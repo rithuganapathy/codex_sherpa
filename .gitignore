@@ -1,0 +1,7 @@
+repos/
+venv/
+__pycache__/
+*.pyc
+.chroma/
+.env
+out/
