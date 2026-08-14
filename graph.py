@@ -155,6 +155,22 @@ def build_graph() -> Any:
     return g.compile()
 
 
+def save_outputs(state: State) -> Path:
+    """Persist a finished run. Called by the CLI *and* the Streamlit app.
+
+    The UI used to drive the graph itself and never wrote anything, so a run
+    survived only as long as the browser session: a refresh lost it, it never
+    appeared under "already done earlier", and the deep link could not find it.
+    """
+    repo = state["repo"]
+    draft, reviews = state["draft"], state["reviews"]
+    OUT_DIR.mkdir(exist_ok=True)
+    (OUT_DIR / f"{repo}.draft.json").write_text(draft.to_json(), encoding="utf8")
+    (OUT_DIR / f"{repo}.md").write_text(draft.to_markdown(), encoding="utf8")
+    (OUT_DIR / f"{repo}.review.json").write_text(Review.dump(reviews), encoding="utf8")
+    return OUT_DIR / f"{repo}.md"
+
+
 def run(url: str, top: int = 10, max_rounds: int = 2, reuse: bool = False) -> State:
     started = time.monotonic()
     final: State = build_graph().invoke(
@@ -163,11 +179,8 @@ def run(url: str, top: int = 10, max_rounds: int = 2, reuse: bool = False) -> St
     )
 
     repo = final["repo"]
-    OUT_DIR.mkdir(exist_ok=True)
-    draft, reviews = final["draft"], final["reviews"]
-    (OUT_DIR / f"{repo}.draft.json").write_text(draft.to_json(), encoding="utf8")
-    (OUT_DIR / f"{repo}.md").write_text(draft.to_markdown(), encoding="utf8")
-    (OUT_DIR / f"{repo}.review.json").write_text(Review.dump(reviews), encoding="utf8")
+    reviews = final["reviews"]
+    save_outputs(final)
 
     passed = sum(1 for r in reviews if r.passed)
     print(f"\n{'=' * 62}")

@@ -19,6 +19,7 @@ import re
 import sys
 from pathlib import Path
 
+import manifest
 from agents.critic import Issue, Review
 from agents.mapper import OUT_DIR, RepoMap, SymbolNote
 from agents.writer import Draft
@@ -191,13 +192,20 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
         "## Contents",
         "",
     ]
-    headings = [s.heading for s in draft.sections] + [
-        "Architecture", "Symbol reference", "Verification report"]
+    started = manifest.render(
+        manifest.read_manifest(analysis.root, list(analysis.root.rglob("*.py"))))
+
+    headings = ([s.heading for s in draft.sections]
+                + (["Getting started"] if started else [])
+                + ["Architecture", "Symbol reference", "Verification report"])
     parts += [f"{i}. [{h}](#{_slug(h)})" for i, h in enumerate(headings, 1)]
     parts.append("")
 
     for s in draft.sections:
         parts += [f"## {s.heading}", "", s.body.strip(), ""]
+
+    if started:
+        parts += ["## Getting started", "", started, ""]
 
     diagram = mermaid_call_graph(analysis, repo_map.notes)
     parts += ["## Architecture", ""]

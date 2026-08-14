@@ -19,9 +19,11 @@ import streamlit as st
 from agents.critic import Review
 from agents.mapper import OUT_DIR, RepoMap
 from agents.writer import Draft
+import manifest
 from aggregator import build_document, graphviz_call_graph, mermaid_call_graph
-from analyze import analyze
-from graph import build_graph
+from analyze import analyze, analyze_files
+from graph import build_graph, save_outputs
+from ingest import list_python_files
 from llm import CODE_MODEL, PROSE_MODEL, LLMError, available_models
 
 st.set_page_config(
@@ -330,6 +332,10 @@ def run_pipeline(url: str, top: int, max_rounds: int, reuse: bool) -> dict:
                             st.caption(f"  · {r.heading}: "
                                        + "; ".join(i.detail[:80] for i in r.errors))
 
+        if state.get("draft") and state.get("reviews"):
+            saved = save_outputs(state)
+            st.caption(f"Saved to {saved.name}, so a refresh will not lose it.")
+
         status.update(label=f"Done in {time.monotonic() - started:.0f}s",
                       state="complete", expanded=False)
     return state
@@ -351,8 +357,16 @@ def render_results(state: dict) -> None:
     repo_map, draft, reviews = state["repo_map"], state["draft"], state["reviews"]
     analysis = state.get("analysis")
     if analysis is None:
-        with st.spinner("Re-parsing repository for the diagram…"):
-            analysis = analyze(state["url"]) if state.get("url") else None
+        # Parse the clone the map already points at. Deriving a URL from the
+        # repo name would guess the wrong owner (psf/requests is not
+        # pallets/requests) and this needs no network at all.
+        root = Path(repo_map.root)
+        if root.exists():
+            with st.spinner("Re-reading the source for the diagram…"):
+                analysis = analyze_files(root, list_python_files(root))
+        elif state.get("url"):
+            with st.spinner("Fetching the repository again…"):
+                analysis = analyze(state["url"])
         state["analysis"] = analysis
 
     passed = sum(1 for r in reviews if r.passed)
@@ -367,7 +381,8 @@ def render_results(state: dict) -> None:
 
     doc = build_document(analysis, repo_map, draft, reviews) if analysis else None
 
-    tabs = st.tabs(["Documentation", "Architecture", "Verification", "Symbols"])
+    tabs = st.tabs(["Documentation", "Getting started", "Architecture",
+                    "Verification", "Symbols"])
 
     with tabs[0]:
         for s in draft.sections:
@@ -379,6 +394,20 @@ def render_results(state: dict) -> None:
                                mime="text/markdown")
 
     with tabs[1]:
+        started = ""
+        if analysis is not None:
+            started = manifest.render(manifest.read_manifest(
+                analysis.root, list(analysis.root.rglob("*.py"))))
+        if started:
+            # No caption here: render() opens with its own provenance line, and
+            # saying it twice reads like the page does not trust itself.
+            st.markdown(started, unsafe_allow_html=True)
+        else:
+            st.info("This repo has no README install steps, no dependency list "
+                    "and no obvious entry point, so there is nothing honest to "
+                    "put here.")
+
+    with tabs[2]:
         dot = graphviz_call_graph(analysis, repo_map.notes) if analysis else ""
         if dot:
             st.caption("Who calls whom, among the functions that matter most. "
@@ -393,7 +422,7 @@ def render_results(state: dict) -> None:
                     "flow worth drawing. Nudge the coverage slider up and the "
                     "picture usually appears.")
 
-    with tabs[2]:
+    with tabs[3]:
         st.caption("Sentence by sentence, checked against the code. This is the "
                    "bit most generated documentation quietly skips.")
         for r in reviews:
@@ -409,7 +438,7 @@ def render_results(state: dict) -> None:
                 for i in r.warnings:
                     st.warning(f"**{i.kind}** — {i.detail}")
 
-    with tabs[3]:
+    with tabs[4]:
         st.dataframe(
             [{"Symbol": n.qualname.split(".")[-1], "Kind": n.kind, "Role": n.role,
               "Location": f"{n.file}:{n.start_line}", "Score": n.score,
@@ -466,7 +495,6 @@ with st.sidebar:
         if pick != "—" and st.button("Load", use_container_width=True):
             loaded = load_cached(pick)
             if loaded:
-                loaded["url"] = f"https://github.com/pallets/{pick}"
                 st.session_state["result"] = loaded
             else:
                 st.error(f"Incomplete artefacts for {pick}")
@@ -495,7 +523,6 @@ _linked = st.query_params.get("repo")
 if _linked and "result" not in st.session_state:
     _loaded = load_cached(_linked)
     if _loaded:
-        _loaded["url"] = f"https://github.com/pallets/{_linked}"
         st.session_state["result"] = _loaded
     else:
         st.warning(f"No saved run for “{_linked}”. Generate it first.")

@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: Codex Sherpa",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "app.py", "--server.port", "8501"],
+      "console": "integratedTerminal",
+      // Streamlit's own frames are not "my code"; leaving this false lets
+      // breakpoints inside callbacks actually bind.
+      "justMyCode": false
+    },
+    {
+      "name": "Pipeline: full run on Flask",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/graph.py",
+      "args": ["https://github.com/pallets/flask", "--top", "8", "--reuse"],
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Selfcheck (fast, offline)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/selfcheck.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Critic demo (catches a wrong explanation)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agents.critic",
+      "args": ["flask", "--demo"],
+      "console": "integratedTerminal"
+    }
+  ]
+}

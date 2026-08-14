@@ -186,6 +186,18 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
                 continue
             if any((s, o) in edges for s in subj_quals for o in obj_quals):
                 continue  # verified against the call graph
+
+            # "prepare_url is a method of PreparedRequest" is ownership, not a
+            # call. Extraction files these under 'calls' constantly.
+            if any(s.startswith(o + ".") or o.startswith(s + ".")
+                   for s in subj_quals for o in obj_quals):
+                continue
+
+            # Deliberately NOT done here: treating "the reverse edge exists" as
+            # an extraction slip. It cannot be distinguished from docs that
+            # genuinely state a relationship backwards, which is exactly the
+            # error this tool exists to catch. The containment rule above
+            # already covers the real-world case that motivated it.
             real = sorted({x.split(".")[-1] for s in subj_quals
                            for x in analysis.callees(s)})
             issues.append(Issue(
@@ -270,6 +282,22 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
     return issues
 
 
+def name_severity(token: str) -> str:
+    """How confident are we that an unknown backticked token is a real mistake?
+
+    A fabricated API name almost always looks like one: dotted, snake_case, or
+    multi-capital CamelCase. A single plain word is usually an example value
+    (`Key` in a dictionary demo) or prose emphasis, and calling that an error
+    fails a section nobody can fix.
+    """
+    looks_like_api = (
+        "." in token
+        or "_" in token
+        or sum(c.isupper() for c in token) >= 2
+    )
+    return "error" if looks_like_api else "warning"
+
+
 def known_names(analysis: Analysis) -> set[str]:
     """Everything the docs may legitimately name in backticks.
 
@@ -298,7 +326,7 @@ def review_section(section: Section, analysis: Analysis,
     known = known_names(analysis)
 
     issues = [
-        Issue("unknown-name", "error", name,
+        Issue("unknown-name", name_severity(name), name,
               f"`{name}` appears in the text but exists nowhere in the repository")
         for name in ungrounded_names(section, known)
     ]

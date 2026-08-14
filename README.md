@@ -178,6 +178,24 @@ Writes `out/<repo>.md` and `out/<repo>.draft.json`. Flask: 6 calls, ~48s, 0 swap
   nothing when the payload is markdown. Structured output stays for machine-read data.
 - Each prompt carries an allow-list of symbols and the verified call facts.
 
+### Voice
+
+The reader is assumed to be smart but new to the project, and short on patience.
+`SYSTEM` asks for plain words, 2-3 sentence paragraphs, a one-sentence
+jargon-free opener per section, and purpose before mechanics. Each section prompt
+also caps its length (150 words for the overview, 120 for a component).
+
+Two enforcement details, because a 7B model treats style rules as suggestions:
+`clean_body()` strips em dashes it used anyway, and removes fact-sheet headings
+("Calls (verified):") that it sometimes copies out of the prompt.
+
+`regenerate()` repeats the voice rules. Without that, a correction round produces
+"X calls A, B and C" and quietly undoes the writing.
+
+Measured on `requests`, dense voice vs plain voice: 683 -> 533 words, 17.9 -> 15.1
+words per sentence, and 5/5 sections verified with **zero** rewrite rounds instead
+of two. Simpler prose makes fewer unverifiable claims, so it also costs less.
+
 ### Two kinds of hallucination, and only one is cheap to catch
 
 `ungrounded_names()` is a deterministic check: any backticked identifier that exists

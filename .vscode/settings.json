@@ -1,0 +1,12 @@
+{
+  // Points VS Code at the project venv so every terminal, run, and debug
+  // session uses the interpreter that actually has the dependencies.
+  "python.defaultInterpreterPath": "${workspaceFolder}\\venv\\Scripts\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
+  "files.exclude": {
+    "**/__pycache__": true,
+    "repos": true,
+    ".chroma": true
+  }
+}

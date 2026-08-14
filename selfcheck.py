@@ -192,6 +192,7 @@ def orchestrate():
 
 def check_writer(check) -> None:
     """Phase 6 grounding + draft round-trip. Offline."""
+    from agents.critic import name_severity
     from agents.writer import Draft, Section, ungrounded_names
 
     known = {"Flask", "wsgi_app", "flask.app.Flask.wsgi_app", "helper"}
@@ -207,6 +208,30 @@ def check_writer(check) -> None:
     )
     bad = ungrounded_names(s, known)
     check("invented name is flagged", "totally_made_up_thing" in bad, True)
+
+    # Example values in a code demo are not invented API.
+    s_lit = Section(key="lit", kind="component", heading="L",
+                    body="Stored as `'Key'` and `\"key2\"`, shown as `Key`.")
+    lit_bad = ungrounded_names(s_lit, known)
+    check("quoted literals are ignored", [b for b in lit_bad if "'" in b or '\"' in b], [])
+
+    # Cleanup of things a 7B model emits regardless of the prompt.
+    from agents.writer import clean_body
+    check("em dashes are removed", clean_body("Runs — always — fine."),
+          "Runs, always, fine.")
+    check("role labels are stripped",
+          clean_body("`url_for` (entry point) makes URLs."),
+          "`url_for` makes URLs.")
+    check("copied fact headings are stripped",
+          clean_body("It wraps a function.\n\nCalls (verified):\n- `record`"),
+          "It wraps a function.")
+    check("ordinary brackets survive",
+          clean_body("It returns a list (usually empty)."),
+          "It returns a list (usually empty).")
+    check("a bare single word is only a warning", name_severity("Key"), "warning")
+    check("snake_case unknown is an error", name_severity("turbo_encabulate"), "error")
+    check("dotted unknown is an error", name_severity("flask.nope"), "error")
+    check("CamelCase unknown is an error", name_severity("TurboEncabulator"), "error")
     check("real name is not flagged", "Flask" in bad, False)
     check("qualname resolves via its last segment",
           "flask.app.Flask.wsgi_app" in bad, False)
@@ -246,9 +271,22 @@ def check_critic(a, check) -> None:
     check("verified call passes", one(
         {"type": "calls", "subject": "uses_inherited", "object": "shared",
          "quote": "uses_inherited calls shared"}), "clean")
+    # Also the reversal case: the real edge runs shared -> helper. A claim
+    # stating a true relationship backwards must stay an error, since that is
+    # precisely the mistake this tool exists to catch.
     check("fabricated call is an error", one(
         {"type": "calls", "subject": "helper", "object": "shared",
          "quote": "helper calls shared"}), "error/false-call")
+    # "prepare_url is a method of PreparedRequest" is ownership, and the model
+    # files these under 'calls' constantly.
+    check("owning class is not a false call", one(
+        {"type": "calls", "subject": "shared", "object": "Base",
+         "quote": "shared is a method of Base"}), "clean")
+    # Nested definitions count as containment too: `inner` lives inside `outer`.
+    check("enclosing function is not a false call", one(
+        {"type": "calls", "subject": "inner", "object": "outer",
+         "quote": "inner is defined inside outer"}), "clean")
+
     check("call to a symbol outside the repo is only a warning", one(
         {"type": "calls", "subject": "helper", "object": "requests_get",
          "quote": "helper calls requests_get"}), "warning/unverifiable")
@@ -414,6 +452,56 @@ def check_aggregator(a, check) -> None:
     check("contents links the written section", "[First bit](#first-bit)" in doc, True)
 
 
+def check_manifest(check) -> None:
+    """Getting-started extraction. Pure file reading, no model, no network."""
+    from manifest import read_manifest, render
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "pyproject.toml").write_text(
+            '[project]\n'
+            'name = "demolib"\n'
+            'description = "A demo"\n'
+            'requires-python = ">=3.10"\n'
+            'dependencies = ["requests>=2", "click"]\n'
+            '[project.scripts]\n'
+            'demo = "demolib.cli:main"\n', encoding="utf8")
+        (root / "README.md").write_text(
+            "# demolib\n\nInstall it:\n\n```bash\n$ pip install demolib\n```\n\n"
+            "Use it:\n\n```python\nimport demolib\ndemolib.go()\n```\n",
+            encoding="utf8")
+        (root / "__main__.py").write_text("print('hi')\n", encoding="utf8")
+        (root / "runme.py").write_text(
+            'if __name__ == "__main__":\n    pass\n', encoding="utf8")
+        (root / "quiet.py").write_text("x = 1\n", encoding="utf8")
+        (root / "tests").mkdir()
+
+        m = read_manifest(root, list(root.rglob("*.py")))
+
+        check("project name read", m.name, "demolib")
+        check("python requirement read", m.python_requires, ">=3.10")
+        check("dependencies read", m.dependencies, ["requests>=2", "click"])
+        check("console scripts read", m.console_scripts, {"demo": "demolib.cli:main"})
+        # The "$ " prompt must be stripped or the command is not copy-pasteable.
+        check("install command quoted from README", m.install_cmds,
+              ["pip install demolib"])
+        check("usage example prefers the python block",
+              m.usage_block.startswith("import demolib"), True)
+        check("runnable files detected", m.runnable_modules,
+              ["__main__.py", "runme.py"])
+        check("non-runnable file excluded", "quiet.py" in m.runnable_modules, False)
+        check("test suite detected", m.has_tests, True)
+
+        out = render(m)
+        check("render marks the install as quoted", "quoted from README.md" in out, True)
+        check("render includes the entry point", "demolib.cli:main" in out, True)
+
+        # A bare repo must produce nothing rather than an invented section.
+        bare = Path(tmp) / "bare"
+        bare.mkdir()
+        check("empty repo renders nothing", render(read_manifest(bare, [])), "")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -451,6 +539,7 @@ def main() -> int:
     check_critic(a, check)
     check_params(a, check)
     check_aggregator(a, check)
+    check_manifest(check)
 
     if failures:
         print(f"FAIL ({len(failures)})")
