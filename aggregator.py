@@ -160,6 +160,95 @@ def verification_report(reviews: list[Review]) -> str:
     return "\n".join(lines)
 
 
+def limitations(analysis: Analysis, repo_map: RepoMap,
+                reviews: list[Review]) -> str:
+    """What this document does not cover, from measured numbers.
+
+    A tool that refuses to state unproven claims should also say where it ran
+    out of certainty. Every figure here is counted, not estimated.
+    """
+    from collections import Counter
+
+    from ingest import list_python_files
+
+    all_py = list(analysis.root.rglob("*.py"))
+    kept = list_python_files(analysis.root)
+    skipped = len(all_py) - len(kept)
+
+    described = len(repo_map.notes)
+    total = len(analysis.symbols)
+    unresolved = len(analysis.unresolved)
+    edges = len(analysis.edges)
+    ambiguous = sum(1 for _, d in analysis.unresolved if "ambiguous" in d)
+    external = Counter(d.split(".")[0] for _, d in analysis.unresolved
+                       if "." in d and "ambiguous" not in d
+                       and d.split(".")[0] not in ("self", "cls"))
+    low_conf = [n for n in repo_map.notes if n.confidence == "low"]
+    warnings = [i for r in reviews for i in r.warnings]
+
+    out = [
+        "This tool is confident about a narrow set of things and vague about "
+        "the rest. Here is the boundary, in numbers.",
+        "",
+        "**Coverage**",
+        "",
+        f"- {described} of {total} functions and classes are described here. "
+        f"They were chosen by call-graph ranking, not by reading everything. "
+        f"The other {total - described} are real code this document never "
+        f"mentions.",
+    ]
+    if skipped > 0:
+        out.append(f"- {skipped} of {len(all_py)} Python files were skipped "
+                   f"before analysis even started: tests, docs, examples and "
+                   f"build directories.")
+    out.append("- Non-Python files are not read at all, apart from the "
+               "packaging files used for Getting started.")
+
+    out += ["", "**What the call graph could not resolve**", ""]
+    out.append(f"- {edges} calls were matched to a definition in this "
+               f"repository. {unresolved} were not.")
+    if external:
+        # Not all of these are libraries. The leading segment of `ctx.push()`
+        # is a local variable, and calling that "third-party" in the honesty
+        # section would be its own small lie.
+        names = ", ".join(f"`{n}`" for n, _ in external.most_common(5))
+        out.append(f"- Those go either to code outside this repository or to "
+                   f"objects whose type cannot be worked out from the syntax "
+                   f"alone ({names}). Absence of an arrow is not evidence that "
+                   f"no call happens.")
+    if ambiguous:
+        out.append(f"- {ambiguous} were dropped as ambiguous, where several "
+                   f"definitions share a name and the correct one cannot be "
+                   f"told apart without type inference.")
+    out.append("- Anything decided at runtime is invisible here: dynamic "
+               "dispatch, `getattr` lookups, callbacks passed as arguments, "
+               "and registries filled in at import time.")
+
+    if analysis.parse_errors:
+        out += ["", f"- {len(analysis.parse_errors)} file(s) had syntax the "
+                    f"parser could only partly read."]
+    if low_conf:
+        names = ", ".join(f"`{n.qualname.split('.')[-1]}`" for n in low_conf[:5])
+        out += ["", f"- The model reported low confidence describing "
+                    f"{len(low_conf)} symbol(s): {names}."]
+
+    out += ["", "**What the verification does not check**", "",
+            "- Only two kinds of claim are machine-checked: that one function "
+            "calls another, and that a symbol lives where the text says. "
+            "Everything else in the prose is unverified.",
+            "- Grouping is not checked. A function can be described under the "
+            "wrong component and still pass.",
+            "- Nothing here tests behaviour. The document can be accurate "
+            "about structure and still misdescribe what the code achieves.",
+            "- Whether the explanation is *useful* is not something a call "
+            "graph can measure."]
+    if warnings:
+        out.append(f"- {len(warnings)} claim(s) in this document could not be "
+                   f"checked either way. They are listed in the verification "
+                   f"report as unverifiable.")
+    return "\n".join(out)
+
+
 def symbol_reference(notes: list[SymbolNote]) -> str:
     lines = ["| Symbol | Kind | Role | Location | Purpose |",
              "| --- | --- | --- | --- | --- |"]
@@ -197,7 +286,8 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
 
     headings = ([s.heading for s in draft.sections]
                 + (["Getting started"] if started else [])
-                + ["Architecture", "Symbol reference", "Verification report"])
+                + ["Architecture", "Symbol reference", "Verification report",
+                   "What this does not cover"])
     parts += [f"{i}. [{h}](#{_slug(h)})" for i, h in enumerate(headings, 1)]
     parts.append("")
 
@@ -220,6 +310,8 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
 
     parts += ["## Symbol reference", "", symbol_reference(repo_map.notes), ""]
     parts += ["## Verification report", "", verification_report(reviews), ""]
+    parts += ["## What this does not cover", "",
+              limitations(analysis, repo_map, reviews), ""]
     return "\n".join(parts)
 
 

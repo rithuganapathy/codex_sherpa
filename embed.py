@@ -189,6 +189,15 @@ def build_index(analysis: Analysis, rebuild: bool = True) -> chromadb.Collection
     return col
 
 
+def has_index(repo_name: str) -> bool:
+    """Whether this repo has already been embedded, without loading the model."""
+    try:
+        col = _client().get_collection(collection_name(REPOS_DIR / repo_name))
+        return col.count() > 0
+    except Exception:
+        return False
+
+
 def search(repo_name: str, query: str, k: int = 5) -> list[dict]:
     """Top-k *distinct symbols*.
 

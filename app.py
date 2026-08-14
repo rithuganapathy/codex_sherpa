@@ -20,7 +20,8 @@ from agents.critic import Review
 from agents.mapper import OUT_DIR, RepoMap
 from agents.writer import Draft
 import manifest
-from aggregator import build_document, graphviz_call_graph, mermaid_call_graph
+from aggregator import (build_document, graphviz_call_graph, limitations,
+                        mermaid_call_graph)
 from analyze import analyze, analyze_files
 from graph import build_graph, save_outputs
 from ingest import list_python_files
@@ -382,7 +383,7 @@ def render_results(state: dict) -> None:
     doc = build_document(analysis, repo_map, draft, reviews) if analysis else None
 
     tabs = st.tabs(["Documentation", "Getting started", "Architecture",
-                    "Verification", "Symbols"])
+                    "Verification", "Symbols", "Limits"])
 
     with tabs[0]:
         for s in draft.sections:
@@ -444,6 +445,15 @@ def render_results(state: dict) -> None:
               "Location": f"{n.file}:{n.start_line}", "Score": n.score,
               "Purpose": n.purpose} for n in repo_map.notes],
             use_container_width=True, hide_index=True)
+
+    with tabs[5]:
+        if analysis is not None:
+            st.caption("Where this tool stops being certain. Every number here "
+                       "is counted, not estimated.")
+            st.markdown(limitations(analysis, repo_map, reviews))
+        else:
+            st.info("The source is not available locally, so coverage cannot "
+                    "be measured.")
 
 
 st.markdown(STYLE, unsafe_allow_html=True)

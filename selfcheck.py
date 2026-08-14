@@ -451,6 +451,27 @@ def check_aggregator(a, check) -> None:
         check(f"document has {heading}", heading in doc, True)
     check("contents links the written section", "[First bit](#first-bit)" in doc, True)
 
+    # --- limitations: every number must be counted, not asserted ---
+    from aggregator import limitations
+
+    lim = limitations(a, m, reviews)
+    described, total = len(m.notes), len(a.symbols)
+    check("states how many symbols were described",
+          f"{described} of {total}" in lim, True)
+    check("states the unresolved call count",
+          f"{len(a.edges)} calls were matched" in lim, True)
+    check("admits grouping is unchecked", "Grouping is not checked" in lim, True)
+    check("admits runtime behaviour is invisible",
+          "dynamic dispatch" in lim, True)
+    check("counts unverifiable claims from the review",
+          "1 claim(s) in this document could not be checked" in lim, True)
+    # Local variables like `ctx` show up in unresolved calls. Calling them
+    # third-party inside the honesty section would be its own small lie.
+    check("does not label unresolved targets as third-party",
+          "third-party" in lim, False)
+    check("limitations appears in the document",
+          "## What this does not cover" in doc, True)
+
 
 def check_manifest(check) -> None:
     """Getting-started extraction. Pure file reading, no model, no network."""
