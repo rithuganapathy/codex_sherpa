@@ -406,13 +406,33 @@ def self_defined_names(text: str) -> set[str]:
 def review_section(section: Section, analysis: Analysis,
                    model: str = CODE_MODEL) -> Review:
     known = known_names(analysis) | self_defined_names(section.body)
+
+    # Names introduced by the section's own example code. Writing
+    # `blueprint.record_once(my_setup_function)` is ordinary documentation: the
+    # placeholder is for the reader to replace, not a claim that the repo
+    # contains it. Still reported, because a fabricated API could hide in an
+    # example too, but never as an error.
+    #
+    # Read from the ORIGINAL body. prose_only strips the code blocks out, so
+    # doing this afterwards found nothing and the guard silently did nothing.
+    in_examples = set()
+    for block in re.findall(r"```[^\n]*\n(.*?)```", section.body, re.S):
+        in_examples.update(re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", block))
+
     section = replace(section, body=prose_only(section.body))
 
-    issues = [
-        Issue("unknown-name", name_severity(name), name,
-              f"`{name}` appears in the text but exists nowhere in the repository")
-        for name in ungrounded_names(section, known)
-    ]
+    issues = []
+    for name in ungrounded_names(section, known):
+        if name.split(".")[-1] in in_examples:
+            issues.append(Issue(
+                "unverifiable", "warning", name,
+                f"`{name}` is not in this repository, but it only appears "
+                f"inside an example, where a placeholder name is expected"))
+        else:
+            issues.append(Issue(
+                "unknown-name", name_severity(name), name,
+                f"`{name}` appears in the text but exists nowhere in the "
+                f"repository"))
 
     claims = extract_claims(section, model)
     issues.extend(verify_claims(claims, analysis))

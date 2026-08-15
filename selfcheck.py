@@ -275,6 +275,42 @@ def check_writer(check) -> None:
           d.to_markdown().count("\n## "), 2)
 
 
+def check_example_placeholders(a, check) -> None:
+    """A placeholder in the section's own example is not an invented API."""
+    from agents.critic import review_section
+    from agents.writer import Section
+
+    body = (
+        "Use `helper` to do the work. For example:\n\n"
+        "```python\n"
+        "result = helper(my_input_value)\n"
+        "```\n\n"
+        "Here `my_input_value` is whatever you want to pass in. "
+        "It also calls `totally_made_up_api`."
+    )
+    s = Section(key="ex", kind="component", heading="E", body=body)
+    # review_section calls the model; only the deterministic name pass is
+    # exercised here by checking the issues it produces for known names.
+    from agents.critic import known_names, name_severity
+    from agents.writer import ungrounded_names
+
+    known = known_names(a)
+    flagged = ungrounded_names(s, known)
+    check("both unknown names are found",
+          {"my_input_value", "totally_made_up_api"} <= set(flagged), True)
+
+    import re as _re
+    in_examples = set()
+    for block in _re.findall(r"```[^\n]*\n(.*?)```", s.body, _re.S):
+        in_examples.update(_re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", block))
+    check("the placeholder is recognised as example-only",
+          "my_input_value" in in_examples, True)
+    check("a name outside the example is not excused",
+          "totally_made_up_api" in in_examples, False)
+    check("a name outside the example is still an error",
+          name_severity("totally_made_up_api"), "error")
+
+
 def check_critic(a, check) -> None:
     """Phase 7 verification — the deterministic half. No LLM.
 
@@ -735,6 +771,7 @@ def main() -> int:
     check_mapper(check)
     check_writer(check)
     check_critic(a, check)
+    check_example_placeholders(a, check)
     check_params(a, check)
     check_aggregator(a, check)
     check_manifest(check)
