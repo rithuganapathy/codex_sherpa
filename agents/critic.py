@@ -362,6 +362,9 @@ def known_names(analysis: Analysis) -> set[str]:
     names = {q.split(".")[-1] for q in analysis.symbols} | set(analysis.symbols)
     for sym in analysis.symbols.values():
         names.update(sym.params)
+    # Instance attributes. `self._blueprints` is real code that documentation
+    # will naturally mention, and it is not a function or a class.
+    names.update(analysis.attributes)
 
     # Packages, modules and directories. "The `flask` package" and "`app.py`"
     # are ordinary things to write, and neither is a symbol in the table.

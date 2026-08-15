@@ -63,6 +63,25 @@ class Symbol:
         return self.end_line - self.start_line + 1
 
 
+def _collect_self_attrs(node: Node, acc: set[str]) -> None:
+    """Names assigned as `self.x = ...`, anywhere in the file.
+
+    Instance attributes are not functions or classes, so they never entered the
+    symbol table, and documentation that mentioned one (`self._blueprints`) was
+    reported as an invented name.
+    """
+    if node.type in ("assignment", "augmented_assignment"):
+        left = node.child_by_field_name("left")
+        if left is not None and left.type == "attribute":
+            obj = left.child_by_field_name("object")
+            attr = left.child_by_field_name("attribute")
+            if (obj is not None and attr is not None
+                    and obj.text.decode("utf8", "replace") in ("self", "cls")):
+                acc.add(attr.text.decode("utf8", "replace"))
+    for child in node.named_children:
+        _collect_self_attrs(child, acc)
+
+
 @dataclass
 class Analysis:
     root: Path
@@ -70,6 +89,7 @@ class Analysis:
     edges: list[tuple[str, str]]  # (caller qualname, callee qualname)
     unresolved: list[tuple[str, str]]  # (caller qualname, raw call text)
     parse_errors: list[str]
+    attributes: set[str] = field(default_factory=set)  # self.x names
 
     def fan(self, qualname: str) -> tuple[int, int]:
         """(callers, callees) — the two numbers every ranking decision uses."""
@@ -175,6 +195,7 @@ class _FileParser:
         self.parser = parser
         self.rel = path.relative_to(root).as_posix()
         self.symbols: dict[str, Symbol] = {}
+        self.attrs: set[str] = set()
 
     def run(self) -> tuple[dict[str, Symbol], str | None]:
         try:
@@ -188,6 +209,7 @@ class _FileParser:
         else:
             err = None
         self.src = src_bytes.decode("utf8", "replace")
+        _collect_self_attrs(tree.root_node, self.attrs)
         self._visit(tree.root_node, module_qualname(self.path, self.root), None)
         return self.symbols, err
 
@@ -252,9 +274,12 @@ def analyze_files(root: Path, files: list[Path]) -> Analysis:
     parser = Parser(PY_LANGUAGE)
     symbols: dict[str, Symbol] = {}
     errors: list[str] = []
+    attributes: set[str] = set()
 
     for path in files:
-        found, err = _FileParser(path, root, parser).run()
+        fp = _FileParser(path, root, parser)
+        found, err = fp.run()
+        attributes |= fp.attrs
         symbols.update(found)
         if err:
             errors.append(err)
@@ -316,7 +341,7 @@ def analyze_files(root: Path, files: list[Path]) -> Analysis:
                 seen.add(key)
                 edges.append(key)
 
-    return Analysis(root, symbols, edges, unresolved, errors)
+    return Analysis(root, symbols, edges, unresolved, errors, attributes)
 
 
 def analyze(url: str) -> Analysis:

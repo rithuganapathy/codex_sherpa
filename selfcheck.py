@@ -28,6 +28,9 @@ def outer():
 class Base:
     """Base docstring."""
 
+    def __init__(self):
+        self.state = []
+
     def shared(self):
         return helper(2)
 
@@ -54,6 +57,7 @@ EXPECTED_CALLS = {
     "sample.helper": [],
     "sample.outer": ["sample.outer.inner"],
     "sample.outer.inner": ["sample.helper"],
+    "sample.Base.__init__": [],
     "sample.Base.shared": ["sample.helper"],
     # self.shared() and super().shared() both reach the inherited method
     "sample.Child.uses_inherited": ["sample.Base.shared"],
@@ -438,6 +442,14 @@ def check_params(a, check) -> None:
     """
     from agents.critic import known_names
     from agents.writer import Section, ungrounded_names
+
+    # Instance attributes are real code that docs mention, and are not symbols.
+    check("self attributes are collected", "state" in a.attributes, True)
+    check("attribute is a known name", "state" in known_names(a), True)
+    s_attr = Section(key="at", kind="component", heading="A",
+                     body="It appends to the `state` list.")
+    check("attribute in backticks is not flagged",
+          ungrounded_names(s_attr, known_names(a)), [])
 
     check("params are extracted", a.symbols["sample.helper"].params, ["x"])
     check("self is not a param", a.symbols["sample.Base.shared"].params, [])
