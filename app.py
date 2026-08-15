@@ -382,7 +382,7 @@ def render_results(state: dict) -> None:
 
     doc = build_document(analysis, repo_map, draft, reviews) if analysis else None
 
-    tabs = st.tabs(["Documentation", "Getting started", "Architecture",
+    tabs = st.tabs(["Documentation", "Ask", "Getting started", "Architecture",
                     "Verification", "Symbols", "Limits"])
 
     with tabs[0]:
@@ -395,6 +395,60 @@ def render_results(state: dict) -> None:
                                mime="text/markdown")
 
     with tabs[1]:
+        st.caption("Ask anything about this repo. The answer is read from the "
+                   "real source, then checked before you see it.")
+        if analysis is None:
+            st.info("The source is not available locally, so questions cannot "
+                    "be answered.")
+        else:
+            q = st.text_input("Your question", key="ask_q",
+                              placeholder="how are session cookies signed?")
+            if st.button("Ask", key="ask_btn") and q.strip():
+                with st.spinner("Searching the code, answering, then checking "
+                                "the answer…"):
+                    try:
+                        # Imported here, not at module scope: this pulls in
+                        # sentence-transformers and torch, which costs 19s. The
+                        # whole app would pay that on every page view even for
+                        # someone who never asks a question.
+                        from agents.answerer import ask
+
+                        st.session_state["answer"] = ask(q.strip(), analysis)
+                    except Exception as exc:
+                        st.exception(exc)
+
+            ans = st.session_state.get("answer")
+            if ans:
+                if ans.verified:
+                    st.success(f"Verified: {ans.review.claims_checked} claims "
+                               f"checked against the call graph, none "
+                               f"contradicted the source.")
+                else:
+                    st.error(f"{len(ans.errors)} claim(s) in this answer "
+                             f"contradict the source. Read it with that in mind.")
+                st.markdown(ans.text)
+
+                for i in ans.errors:
+                    st.error(f"**{i.kind}** — {i.detail}")
+
+                if ans.examples:
+                    from examples import render as render_examples
+
+                    st.markdown(render_examples(ans.examples))
+
+                with st.expander("What the answer was allowed to read"):
+                    st.caption("If these look unrelated to your question, "
+                               "distrust the answer no matter what the badge says.")
+                    for s in ans.sources:
+                        st.markdown(f"`{s['score']:.3f}`  `{s['qualname']}` "
+                                    f"— {s['file']}:{s['start_line']}")
+                if ans.review and ans.review.warnings:
+                    with st.expander(f"{len(ans.review.warnings)} thing(s) that "
+                                     f"could not be checked"):
+                        for i in ans.review.warnings:
+                            st.caption(i.detail)
+
+    with tabs[2]:
         started = ""
         if analysis is not None:
             started = manifest.render(manifest.read_manifest(
@@ -408,7 +462,7 @@ def render_results(state: dict) -> None:
                     "and no obvious entry point, so there is nothing honest to "
                     "put here.")
 
-    with tabs[2]:
+    with tabs[3]:
         dot = graphviz_call_graph(analysis, repo_map.notes) if analysis else ""
         if dot:
             st.caption("Who calls whom, among the functions that matter most. "
@@ -423,7 +477,7 @@ def render_results(state: dict) -> None:
                     "flow worth drawing. Nudge the coverage slider up and the "
                     "picture usually appears.")
 
-    with tabs[3]:
+    with tabs[4]:
         st.caption("Sentence by sentence, checked against the code. This is the "
                    "bit most generated documentation quietly skips.")
         for r in reviews:
@@ -439,14 +493,14 @@ def render_results(state: dict) -> None:
                 for i in r.warnings:
                     st.warning(f"**{i.kind}** — {i.detail}")
 
-    with tabs[4]:
+    with tabs[5]:
         st.dataframe(
             [{"Symbol": n.qualname.split(".")[-1], "Kind": n.kind, "Role": n.role,
               "Location": f"{n.file}:{n.start_line}", "Score": n.score,
               "Purpose": n.purpose} for n in repo_map.notes],
             use_container_width=True, hide_index=True)
 
-    with tabs[5]:
+    with tabs[6]:
         if analysis is not None:
             st.caption("Where this tool stops being certain. Every number here "
                        "is counted, not estimated.")

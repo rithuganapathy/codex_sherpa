@@ -215,6 +215,13 @@ def check_writer(check) -> None:
     lit_bad = ungrounded_names(s_lit, known)
     check("quoted literals are ignored", [b for b in lit_bad if "'" in b or '\"' in b], [])
 
+    # Answers quote real usage, which is full of expressions rather than names.
+    s_expr = Section(key="ex", kind="component", heading="E",
+                     body="Set `app.config['UPLOAD_FOLDER']` and pass "
+                          "`as_attachment=True` to it.")
+    check("code expressions are not treated as names",
+          ungrounded_names(s_expr, known), [])
+
     # Cleanup of things a 7B model emits regardless of the prompt.
     from agents.writer import clean_body
     check("em dashes are removed", clean_body("Runs — always — fine."),
@@ -310,6 +317,13 @@ def check_critic(a, check) -> None:
     check("prose as a location is ignored", one(
         {"type": "location", "subject": "shared", "object": "technical documentation",
          "quote": "shared appears in the technical documentation"}), "clean")
+    check("a call expression is not a location", one(
+        {"type": "location", "subject": "shared", "object": "Base(__name__)",
+         "quote": "obj = Base(__name__)"}), "clean")
+    # Answers to questions quote usage, so the package name shows up as a place.
+    check("the package name counts as a location", one(
+        {"type": "location", "subject": "shared", "object": a.root.name,
+         "quote": f"shared lives in {a.root.name}"}), "clean")
     check("a kind is not a location", one(
         {"type": "location", "subject": "shared", "object": "class",
          "quote": "shared is defined in a class"}), "clean")
@@ -345,6 +359,28 @@ def check_critic(a, check) -> None:
     check("owning class counts as a location", one(
         {"type": "location", "subject": "shared", "object": "sample.Base",
          "quote": "shared lives on sample.Base"}), "clean")
+
+    # --- answers quote examples; the example is not a claim about the repo ---
+    from agents.critic import prose_only, self_defined_names
+
+    answer = (
+        "Use `helper` for this.\n\n"
+        "```python\n@app.route('/x')\ndef download_file():\n"
+        "    return helper(1)\n```\n\n"
+        "The `download_file` view then returns it."
+    )
+    # Assert on text that appears ONLY inside the block, or the check cannot
+    # tell the block from the prose that discusses it.
+    check("code block contents are excluded from verification",
+          "@app.route" in prose_only(answer), False)
+    check("surrounding prose survives",
+          "Use `helper` for this." in prose_only(answer), True)
+    check("names defined in the example are known",
+          "download_file" in self_defined_names(answer), True)
+    check("assignments in the example are known",
+          "app" in self_defined_names("```python\napp = Base()\n```"), True)
+    check("equality is not read as an assignment",
+          self_defined_names("```python\nif x == 1:\n    pass\n```"), set())
 
     r = Review("k", "H", False, 2, verify_claims(
         [{"type": "calls", "subject": "helper", "object": "shared", "quote": "q"}], a))

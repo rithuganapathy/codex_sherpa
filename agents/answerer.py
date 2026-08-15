@@ -19,6 +19,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import textwrap
 from dataclasses import dataclass, field
@@ -30,7 +31,12 @@ from agents.critic import Issue, Review, review_section  # noqa: E402
 from agents.writer import Section  # noqa: E402
 from analyze import Analysis, analyze  # noqa: E402
 from embed import build_index, has_index, search  # noqa: E402
+from examples import Example, find_examples, render as render_examples  # noqa: E402
 from llm import CODE_MODEL, STATS, chat  # noqa: E402
+
+# Parsing a repo's test files takes a second or two. Questions come in batches,
+# so keep the parsed result for the life of the process.
+_TEST_CACHE: dict = {}
 
 # Enough source for the model to answer from, small enough to keep several
 # symbols inside the 8192-token window alongside the question.
@@ -58,6 +64,7 @@ class Answer:
     text: str
     sources: list[dict] = field(default_factory=list)
     review: Review | None = None
+    examples: list[Example] = field(default_factory=list)
 
     @property
     def verified(self) -> bool:
@@ -117,6 +124,21 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
     )
     text = chat(prompt, system=SYSTEM, model=model, temperature=0.1).text
 
+    # An explanation says what something is for. An example shows what calling
+    # it looks like, which is usually the thing that makes it click. Prefer a
+    # symbol the answer actually talked about over the top search hit.
+    mentioned = {m.strip().split(".")[-1].rstrip("()")
+                 for m in re.findall(r"`([^`\n]+)`", text)}
+    candidates = [h["qualname"] for h in hits
+                  if h["qualname"].split(".")[-1] in mentioned]
+    candidates += [h["qualname"] for h in hits if h["qualname"] not in candidates]
+
+    found: list[Example] = []
+    for qual in candidates[:4]:
+        found = find_examples(analysis.root, qual, cache=_TEST_CACHE)
+        if found:
+            break
+
     review = None
     if verify:
         # Same verification path the documentation goes through: claims are
@@ -127,7 +149,7 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
                     allowed=[h["qualname"] for h in hits]),
             analysis, model)
 
-    return Answer(question, text, hits, review)
+    return Answer(question, text, hits, review, found)
 
 
 def _print(a: Answer) -> None:
@@ -135,6 +157,13 @@ def _print(a: Answer) -> None:
     print(f"Q: {a.question}")
     print("=" * 68)
     print(textwrap.fill(a.text, 76, replace_whitespace=False))
+
+    if a.examples:
+        e = a.examples[0]
+        print(f"\nA test in this repo that uses `{e.uses}`  "
+              f"({e.file}:{e.start_line}):\n")
+        for line in e.source.splitlines()[:20]:
+            print(f"  {line}")
 
     print("\nSources (what the answer was allowed to read):")
     for s in a.sources:

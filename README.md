@@ -311,6 +311,50 @@ because there is no rewrite that satisfies it.
 Also: `graph.py` sets `line_buffering` on stdout. Python block-buffers when piped, so
 without it a 6-minute run prints nothing until the end and looks hung.
 
+## Ask the repo a question
+
+```bash
+python -m agents.answerer flask "how are session cookies signed?"
+```
+
+Also the **Ask** tab in the app. The flow reuses everything already built:
+
+```
+question -> Phase 3 semantic search -> real source of the top symbols
+         -> model answers from that ONLY
+         -> Phase 7 verifies the answer's claims against the call graph
+         -> a real example, lifted from the repo's own tests
+```
+
+Phase 3 built a search index that nothing consumed until now. This is what it
+was for.
+
+**Examples come from the test files.** Phase 1 filters tests out so assertions
+and fixtures cannot pollute the call graph; `examples.py` reads them back in for
+examples only. They are real, they are quoted, and CI runs them, so there is
+nothing to hallucinate. Asking Flask how to send a file returns `test_send_file`
+from `tests/test_helpers.py`.
+
+**The weak link is retrieval, not verification.** If the search returns the wrong
+functions, the model answers from the wrong code and the check will not save you:
+it confirms the claimed calls are real, not that the answer is relevant. That is
+why the sources are shown with their scores. If the hits look unrelated to the
+question, distrust the answer regardless of the badge.
+
+Answers needed four extra Critic guards that documentation never triggered,
+because answers quote usage:
+
+- Fenced code blocks are excluded from verification. A usage example is
+  illustration, not a claim about the repo.
+- Names the answer defines in its own example (`download_file`) count as known
+  for that text.
+- Code expressions are not names: `app.config['KEY']`, `as_attachment=True`.
+- A call expression is not a location: `app = Flask(__name__)`.
+
+`app.py` imports the answerer **inside** the button handler. At module scope it
+pulls in sentence-transformers and torch, which measured 19s that every page view
+would pay even for someone who never asks anything.
+
 ## The final document (Phase 9)
 
 ```bash

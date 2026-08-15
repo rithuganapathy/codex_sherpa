@@ -102,6 +102,10 @@ def ungrounded_names(section: Section, known: set[str]) -> list[str]:
         # e.g. `'Key'` in a dict demo. Never an API name.
         if token[:1] in "'\"" or token[-1:] in "'\"":
             continue
+        # Code expressions, not names: `app.config['KEY']`, `as_attachment=True`,
+        # `{"a": 1}`. Answers to questions are full of these.
+        if any(c in token for c in "[]{}=,"):
+            continue
         # `**kwargs` / `*args` are parameters written the way Python spells them.
         token = token.rstrip("()").lstrip("*").strip()
         if not token or _IGNORE_MENTION.search(token):

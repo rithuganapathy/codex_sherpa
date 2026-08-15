@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -212,10 +213,18 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
             bare = obj.split(":")[0].strip()
             if " " in bare and "/" not in bare and not bare.endswith(".py"):
                 continue
+            # `app = Flask(__name__)` in a usage example arrives as
+            # location(app, "Flask(__name__)"). No path contains brackets.
+            if any(c in bare for c in "()[]{}=,"):
+                continue
             # Nor is a kind a place. "BlueprintSetupState is at 'class'" says
             # what it is, not where it lives.
             if bare.lower() in {"class", "module", "function", "method", "file",
                                 "package", "repository", "codebase", "source"}:
+                continue
+            # "send_from_directory is in flask" is how people refer to a
+            # package-level export, and it is true: __init__.py re-exports it.
+            if bare in (analysis.root.name, f"{analysis.root.name}.py"):
                 continue
 
             # Location claims are where extraction is least reliable, so the
@@ -321,9 +330,36 @@ def known_names(analysis: Analysis) -> set[str]:
     return names
 
 
+def prose_only(text: str) -> str:
+    """Drop fenced code blocks before verifying.
+
+    A usage example is illustration, not a claim about the repository. It is
+    full of names invented for the example (`download_file`, `app.py`), and
+    checking them against the symbol table reports the example itself as a
+    hallucination. Only the prose asserts anything.
+    """
+    return re.sub(r"```.*?```", " ", text, flags=re.S)
+
+
+def self_defined_names(text: str) -> set[str]:
+    """Names the text introduces in its own examples.
+
+    An answer that shows a snippet defining `download_file` and then discusses
+    `download_file` in the prose is being coherent, not inventing repository
+    API. Those names are legitimate for that text only.
+    """
+    names: set[str] = set()
+    for block in re.findall(r"```.*?```", text, re.S):
+        names |= set(re.findall(r"^\s*def\s+(\w+)", block, re.M))
+        names |= set(re.findall(r"^\s*class\s+(\w+)", block, re.M))
+        names |= set(re.findall(r"^\s*(\w+)\s*=(?!=)", block, re.M))
+    return names
+
+
 def review_section(section: Section, analysis: Analysis,
                    model: str = CODE_MODEL) -> Review:
-    known = known_names(analysis)
+    known = known_names(analysis) | self_defined_names(section.body)
+    section = replace(section, body=prose_only(section.body))
 
     issues = [
         Issue("unknown-name", name_severity(name), name,
