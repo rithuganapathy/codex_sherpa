@@ -107,15 +107,23 @@ def flower_cluster(uid: str, size: int = 150) -> str:
 STYLE = f"""
 <style>
 /* ---- chrome we do not want ----
-   Streamlit's toolbar carries a Deploy button that would host this app without
-   the local models it depends on, plus a running-man animation while it works.
-   The status box already says what is happening, in words. */
-[data-testid="stToolbar"], [data-testid="stStatusWidget"],
-[data-testid="stDecoration"], #MainMenu, footer {{
+   Hide the pieces, not the toolbar itself. The button that reopens a collapsed
+   sidebar lives inside stToolbar, so hiding the whole thing left no way back
+   once the sidebar was closed. */
+[data-testid="stToolbarActions"], [data-testid="stAppDeployButton"],
+[data-testid="stMainMenu"], [data-testid="stMainMenuButton"],
+[data-testid="stStatusWidget"], [data-testid="stDecoration"],
+#MainMenu, footer {{
     display: none !important;
 }}
+/* Keep the way back to the sidebar, and keep it clickable above the flowers. */
+[data-testid="stExpandSidebarButton"] {{
+    display: flex !important;
+    visibility: visible !important;
+    z-index: 100;
+}}
 
-/* Streamlit reserves a large top margin for that toolbar. With the toolbar
+/* Streamlit reserves a large top margin for that toolbar. With its contents
    gone the page should start where the content starts. */
 [data-testid="stAppViewBlockContainer"], .block-container {{
     padding-top: 1.2rem !important;
