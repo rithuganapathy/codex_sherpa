@@ -267,7 +267,7 @@ def _slug(heading: str) -> str:
 
 
 def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
-                   reviews: list[Review]) -> str:
+                   reviews: list[Review], with_alternatives: bool = False) -> str:
     passed = sum(1 for r in reviews if r.passed)
     claims = sum(r.claims_checked for r in reviews)
 
@@ -296,6 +296,18 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
 
     if started:
         parts += ["## Getting started", "", started, ""]
+
+    # Off by default on purpose: everything else in this phase is deterministic
+    # assembly, and this needs a model call plus network.
+    if with_alternatives:
+        import alternatives
+
+        man = manifest.read_manifest(analysis.root, [])
+        rows = alternatives.find_alternatives(man.dependencies)
+        rendered = alternatives.render(rows)
+        if rendered:
+            parts += ["### If you cannot use these dependencies", "",
+                      rendered, ""]
 
     diagram = mermaid_call_graph(analysis, repo_map.notes)
     parts += ["## Architecture", ""]
@@ -331,12 +343,16 @@ def main() -> None:
     ap.add_argument("repo", help="repo name, e.g. flask")
     ap.add_argument("--url", help="repo URL (defaults to pallets/<repo>)")
     ap.add_argument("--out", type=Path, help="output path")
+    ap.add_argument("--alternatives", action="store_true",
+                    help="suggest substitutes for each dependency "
+                         "(needs a model call and network)")
     args = ap.parse_args()
 
     repo_map, draft, reviews = load_artifacts(args.repo)
     analysis = analyze(args.url or f"https://github.com/pallets/{args.repo}")
 
-    doc = build_document(analysis, repo_map, draft, reviews)
+    doc = build_document(analysis, repo_map, draft, reviews,
+                         with_alternatives=args.alternatives)
     dest = args.out or (OUT_DIR / f"{args.repo}.FINAL.md")
     dest.write_text(doc, encoding="utf8")
 

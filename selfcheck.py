@@ -559,6 +559,68 @@ def check_manifest(check) -> None:
         check("empty repo renders nothing", render(read_manifest(bare, [])), "")
 
 
+def check_alternatives(check) -> None:
+    """Dependency substitutes. Offline: no PyPI calls, no model."""
+    import alternatives as alt
+    from alternatives import DepAlternatives, Package, dep_name, render
+
+    check("version specifier stripped", dep_name("click>=8.1.3"), "click")
+    check("extras stripped", dep_name("foo[extra]>=1"), "foo")
+    check("marker stripped", dep_name("bar; python_version>'3'"), "bar")
+
+    rows = [DepAlternatives(
+        name="jinja2", does="template engine",
+        open_source=[Package(name="Mako", summary="A templating language",
+                             license="MIT", home="https://example.invalid",
+                             relevance=0.68)],
+        commercial=["SomeHostedThing"],
+        rejected=["django-redis (does something else, 0.13)"])]
+    out = render(rows)
+    check("real candidate is shown", "Mako" in out, True)
+    check("pypi summary is used", "A templating language" in out, True)
+    check("similarity is shown so the reader can judge",
+          "similarity 0.68" in out, True)
+    check("paid options are marked unverified",
+          "unverified suggestions" in out, True)
+    check("dropped names are listed with their reason",
+          "django-redis (does something else, 0.13)" in out, True)
+    # The footer used to claim everything was dropped for not existing.
+    check("footer does not misstate the reason",
+          "not found on PyPI" in out, False)
+    check("nothing to show renders nothing", render([]), "")
+
+    empty = render([DepAlternatives(name="itsdangerous", does="signing")])
+    check("no survivors says so rather than inventing one",
+          "Nothing proposed survived" in empty, True)
+
+    # A cached entry written before Package gained a field must miss, not load
+    # silently with that field empty. That bug disabled a filter for a while.
+    # The network is stubbed out so a miss is observable as None.
+    import urllib.request
+
+    entry = ('{{"name": "demo", "summary": "s", "license": "", "home": "",'
+             ' "requires": [], "relevance": 0.0, "_v": {v}}}')
+
+    def boom(*_a, **_kw):
+        raise OSError("network disabled for this test")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_dir, alt.CACHE_DIR = alt.CACHE_DIR, Path(tmp)
+        old_open, urllib.request.urlopen = urllib.request.urlopen, boom
+        try:
+            path = Path(tmp) / "demo.json"
+
+            path.write_text(entry.format(v=alt.CACHE_VERSION), encoding="utf8")
+            check("current cache entry is used", getattr(
+                alt.pypi_info("demo"), "summary", None), "s")
+
+            path.write_text(entry.format(v=alt.CACHE_VERSION - 1), encoding="utf8")
+            check("stale cache entry is refused", alt.pypi_info("demo"), None)
+        finally:
+            alt.CACHE_DIR = old_dir
+            urllib.request.urlopen = old_open
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -597,6 +659,7 @@ def main() -> int:
     check_params(a, check)
     check_aggregator(a, check)
     check_manifest(check)
+    check_alternatives(check)
 
     if failures:
         print(f"FAIL ({len(failures)})")

@@ -457,6 +457,24 @@ def render_results(state: dict) -> None:
             # No caption here: render() opens with its own provenance line, and
             # saying it twice reads like the page does not trust itself.
             st.markdown(started, unsafe_allow_html=True)
+
+            st.divider()
+            st.caption("Cannot use one of these dependencies? Ask for "
+                       "substitutes. Takes about a minute: a model proposes "
+                       "names, then each is checked against PyPI.")
+            if st.button("Find alternatives", key="alt_btn"):
+                with st.spinner("Proposing, then checking each name on PyPI…"):
+                    try:
+                        import alternatives
+                        import manifest as _man
+
+                        deps = _man.read_manifest(analysis.root, []).dependencies
+                        st.session_state["alts"] = alternatives.render(
+                            alternatives.find_alternatives(deps))
+                    except Exception as exc:
+                        st.exception(exc)
+            if st.session_state.get("alts"):
+                st.markdown(st.session_state["alts"], unsafe_allow_html=True)
         else:
             st.info("This repo has no README install steps, no dependency list "
                     "and no obvious entry point, so there is nothing honest to "
