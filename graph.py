@@ -53,8 +53,25 @@ def _note(state: State, msg: str) -> list[str]:
     return state.get("log", []) + [msg]
 
 
+class NoPythonError(RuntimeError):
+    """The repo cloned fine and contains no Python for us to read."""
+
+
 def node_analyze(state: State) -> dict[str, Any]:
     a = analyze(state["url"])
+    if not a.symbols:
+        # Fail here, in a sentence, rather than spending minutes producing an
+        # empty map. Phase 1 only collects .py files, so a TypeScript or Go
+        # project parses to nothing at all.
+        kinds = {}
+        for p in a.root.rglob("*.*"):
+            if p.is_file() and ".git" not in p.parts:
+                kinds[p.suffix] = kinds.get(p.suffix, 0) + 1
+        top = ", ".join(f"{n} {ext}" for ext, n in
+                        sorted(kinds.items(), key=lambda kv: -kv[1])[:3])
+        raise NoPythonError(
+            f"{a.root.name} has no Python files this tool can read. "
+            f"It is mostly {top}. Only Python is supported today.")
     return {
         "analysis": a,
         "repo": a.root.name,

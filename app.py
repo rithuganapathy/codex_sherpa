@@ -24,7 +24,7 @@ from aggregator import (build_document, graphviz_call_graph,
                         graphviz_module_graph, graphviz_phase_flow,
                         module_edges)
 from analyze import analyze, analyze_files
-from graph import build_graph, save_outputs
+from graph import NoPythonError, build_graph, save_outputs
 from ingest import list_python_files
 from llm import CODE_MODEL, PROSE_MODEL, LLMError, available_models
 
@@ -691,6 +691,11 @@ if go:
             result = run_pipeline(url.strip(), top, max_rounds, reuse)
             result["url"] = url.strip()
             st.session_state["result"] = result
+        except NoPythonError as exc:
+            st.error(str(exc))
+            st.caption("Adding another language means a tree-sitter grammar "
+                       "and a few Python-specific rules in the parser. The rest "
+                       "of the pipeline does not care what language it reads.")
         except LLMError as exc:
             st.error(f"Ollama problem: {exc}")
         except Exception as exc:  # surface it instead of a blank page
