@@ -43,6 +43,11 @@ class Child(Base):
     def local_dict(self):
         opts = {}
         return opts.setdefault("a", helper(3))
+
+
+def documented_caller():
+    """Delegates the work, using helper under the hood."""
+    return outer()
 '''
 
 EXPECTED_CALLS = {
@@ -56,6 +61,9 @@ EXPECTED_CALLS = {
     # opts.setdefault() is a dict method, not an edge — but helper(3) nested
     # inside its arguments still counts
     "sample.Child.local_dict": ["sample.helper"],
+    # Its docstring mentions `helper`, which it never calls. Used to check that
+    # a claim the source's own docs make is a warning, not an error.
+    "sample.documented_caller": ["sample.outer"],
 }
 
 
@@ -306,6 +314,13 @@ def check_critic(a, check) -> None:
     check("naming just the callee is enough to judge it", one(
         {"type": "calls", "subject": "helper", "object": "shared",
          "quote": "it hands off to shared"}), "error/false-call")
+
+    # Flask documents send_from_directory as "using send_file" while the code
+    # delegates to werkzeug. Repeating the authors is not the writer's mistake.
+    check("a call the docstring itself claims is a warning", one(
+        {"type": "calls", "subject": "documented_caller", "object": "helper",
+         "quote": "documented_caller uses helper to do the work"}),
+        "warning/unverifiable")
 
     check("call to a symbol outside the repo is only a warning", one(
         {"type": "calls", "subject": "helper", "object": "requests_get",

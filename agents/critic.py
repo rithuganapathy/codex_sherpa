@@ -215,8 +215,27 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
                     quote))
                 continue
 
+            # If the function's own docstring says the same thing, the writer
+            # did not invent it, it repeated the authors. Flask's
+            # send_from_directory is documented as "Send a file from within a
+            # directory using send_file", while the code delegates to werkzeug
+            # and never calls send_file directly. Worth surfacing, not worth
+            # failing a section over.
+            documented = any(
+                obj_short in (analysis.symbols[s].docstring or "").lower()
+                for s in subj_quals
+                for obj_short in [obj.split(".")[-1].lower()]
+            )
             real = sorted({x.split(".")[-1] for s in subj_quals
                            for x in analysis.callees(s)})
+            if documented:
+                issues.append(Issue(
+                    "unverifiable", "warning", subject,
+                    f"{subject!r} has no direct call to {obj!r}, but its own "
+                    f"docstring says it uses {obj!r}. The text is repeating the "
+                    f"source's documentation. Verified calls: {real or 'none'}",
+                    quote))
+                continue
             issues.append(Issue(
                 "false-call", "error", subject,
                 f"{subject!r} does not call {obj!r}. Verified calls from "
