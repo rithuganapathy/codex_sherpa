@@ -51,9 +51,8 @@ SCHEMA = {
                     "dependency": {"type": "string"},
                     "does": {"type": "string"},
                     "open_source": {"type": "array", "items": {"type": "string"}},
-                    "commercial": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["dependency", "does", "open_source", "commercial"],
+                "required": ["dependency", "does", "open_source"],
             },
         }
     },
@@ -65,6 +64,13 @@ SCHEMA = {
 # jinja2/mako scores 0.68 and is exactly right. Below this, the two packages are
 # not doing the same job.
 MIN_RELEVANCE = 0.33
+
+# Some PyPI packages exist only to tell you not to use them. The `asyncio`
+# package is a deprecated backport of the stdlib module, and it was being
+# offered as an alternative to anyio. The package's own summary gives it away.
+DEAD_SUMMARY = re.compile(
+    r"\b(deprecated|no longer maintained|unmaintained|abandoned|"
+    r"use the stdlib|do not use|placeholder|reserved name|renamed to)\b", re.I)
 
 
 @dataclass
@@ -82,13 +88,14 @@ class DepAlternatives:
     name: str
     does: str = ""
     open_source: list[Package] = field(default_factory=list)
-    commercial: list[str] = field(default_factory=list)
-    rejected: list[str] = field(default_factory=list)  # proposed, not on PyPI
+    rejected: list[str] = field(default_factory=list)  # with the reason why
 
 
 def dep_name(spec: str) -> str:
     """`click>=8.1.3` -> `click`, `foo[extra]>=1` -> `foo`."""
-    return re.split(r"[<>=!~\[; ]", spec.strip(), 1)[0].strip().lower()
+    # maxsplit must be keyword: passing it positionally is deprecated in 3.13
+    # and printed a warning into every run's output.
+    return re.split(r"[<>=!~\[; ]", spec.strip(), maxsplit=1)[0].strip().lower()
 
 
 def pypi_info(name: str, use_cache: bool = True) -> Package | None:
@@ -156,11 +163,9 @@ def propose(deps: list[str], model: str) -> list[dict]:
         f"These are the dependencies of a Python project:\n{listing}\n\n"
         "For each one give:\n"
         "- does: what job it performs, in under 12 words.\n"
-        "- open_source: up to 3 free packages that could do the same job. "
-        "PyPI names only, lowercase, no versions. Leave empty if there is no "
-        "real substitute.\n"
-        "- commercial: up to 2 paid or hosted products that cover the same "
-        "need. Leave empty if none apply, which is common for small libraries.\n"
+        "- open_source: up to 3 packages that could do the same job. PyPI "
+        "names only, lowercase, no versions. Leave empty if there is no real "
+        "substitute, which is the right answer for small focused libraries.\n"
         "Never include the dependency itself in its own list."
     )
     data, _ = chat_json(prompt, system=SYSTEM, model=model, schema=SCHEMA)
@@ -209,6 +214,11 @@ def find_alternatives(deps: list[str], model: str | None = None,
                 row.rejected.append(f"{cand_name} (builds on {dep})")
                 continue
 
+            if DEAD_SUMMARY.search(pkg.summary):
+                row.rejected.append(f"{cand_name} (its own PyPI page says not "
+                                    f"to use it)")
+                continue
+
             # Existing on PyPI proves a name is real, not that it does the same
             # job. Compare what the two packages say they do.
             if base and base.summary and pkg.summary:
@@ -219,8 +229,6 @@ def find_alternatives(deps: list[str], model: str | None = None,
                     continue
             row.open_source.append(pkg)
 
-        row.commercial = [str(c).strip() for c in
-                          list(entry.get("commercial", []))[:2] if str(c).strip()]
         out.append(row)
     return out
 
@@ -235,6 +243,10 @@ def render(rows: list[DepAlternatives]) -> str:
         "on top of the package it claims to replace, and describe a similar "
         "job. Descriptions below are PyPI's own words. These are still "
         "suggestions, not verified equivalents.",
+        "",
+        "Only packages on PyPI are listed. A paid or hosted column was tried "
+        "and removed: nothing could check it, and it suggested free web "
+        "frameworks as commercial substitutes for an HTTP client.",
         "",
     ]
     for r in rows:
@@ -253,9 +265,6 @@ def render(rows: list[DepAlternatives]) -> str:
                 out.append("".join(bits))
         else:
             out.append("- Nothing proposed survived the checks.")
-        if r.commercial:
-            out.append(f"- Paid or hosted, **unverified suggestions**: "
-                       + ", ".join(r.commercial))
         out.append("")
 
     dropped = sorted({n for r in rows for n in r.rejected})

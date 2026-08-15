@@ -573,21 +573,32 @@ def check_alternatives(check) -> None:
         open_source=[Package(name="Mako", summary="A templating language",
                              license="MIT", home="https://example.invalid",
                              relevance=0.68)],
-        commercial=["SomeHostedThing"],
         rejected=["django-redis (does something else, 0.13)"])]
     out = render(rows)
     check("real candidate is shown", "Mako" in out, True)
     check("pypi summary is used", "A templating language" in out, True)
     check("similarity is shown so the reader can judge",
           "similarity 0.68" in out, True)
-    check("paid options are marked unverified",
-          "unverified suggestions" in out, True)
+    # The paid column was removed: nothing could check it, and it suggested
+    # free web frameworks as commercial substitutes for an HTTP client.
+    check("no paid column is rendered", "Paid or hosted" in out, False)
+    check("its removal is explained rather than silent",
+          "A paid or hosted column was tried and removed" in out, True)
     check("dropped names are listed with their reason",
           "django-redis (does something else, 0.13)" in out, True)
     # The footer used to claim everything was dropped for not existing.
     check("footer does not misstate the reason",
           "not found on PyPI" in out, False)
     check("nothing to show renders nothing", render([]), "")
+
+    # A package whose PyPI page says not to use it is not an alternative.
+    check("deprecation is detected from the summary",
+          bool(alt.DEAD_SUMMARY.search(
+              "Deprecated backport of asyncio; use the stdlib package instead")),
+          True)
+    check("a healthy summary is not mistaken for one",
+          bool(alt.DEAD_SUMMARY.search("A friendly Python library for async "
+                                       "concurrency and I/O")), False)
 
     empty = render([DepAlternatives(name="itsdangerous", does="signing")])
     check("no survivors says so rather than inventing one",
