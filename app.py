@@ -21,8 +21,7 @@ from agents.mapper import OUT_DIR, RepoMap
 from agents.writer import Draft
 import manifest
 from aggregator import (build_document, graphviz_call_graph,
-                        graphviz_module_graph, limitations,
-                        mermaid_call_graph, mermaid_module_graph,
+                        graphviz_module_graph, graphviz_phase_flow,
                         module_edges)
 from analyze import analyze, analyze_files
 from graph import build_graph, save_outputs
@@ -107,6 +106,25 @@ def flower_cluster(uid: str, size: int = 150) -> str:
 
 STYLE = f"""
 <style>
+/* ---- chrome we do not want ----
+   Streamlit's toolbar carries a Deploy button that would host this app without
+   the local models it depends on, plus a running-man animation while it works.
+   The status box already says what is happening, in words. */
+[data-testid="stToolbar"], [data-testid="stStatusWidget"],
+[data-testid="stDecoration"], #MainMenu, footer {{
+    display: none !important;
+}}
+
+/* Streamlit reserves a large top margin for that toolbar. With the toolbar
+   gone the page should start where the content starts. */
+[data-testid="stAppViewBlockContainer"], .block-container {{
+    padding-top: 1.2rem !important;
+}}
+[data-testid="stHeader"] {{ height: 0; background: transparent; }}
+
+/* "Press Enter to apply" under every input. */
+[data-testid="InputInstructions"] {{ display: none !important; }}
+
 /* ---- headline ---- */
 .sherpa-hero {{
     background: linear-gradient(120deg, #FFE3F1 0%, #F3E3FB 50%, #FFE8DC 100%);
@@ -199,7 +217,26 @@ STYLE = f"""
     background: linear-gradient(180deg, #FDEAF4 0%, #F1E4FB 100%);
     border-right: 1px solid {PALETTE['pink_soft']};
 }}
-[data-testid="stSidebar"] h2 {{ color: {PALETTE['pink']}; font-weight: 800; }}
+[data-testid="stSidebar"] h2 {{
+    color: {PALETTE['pink']};
+    font-weight: 800;
+    margin-bottom: 0.35rem;
+}}
+
+/* The repo box is the first thing anyone touches, so it reads as a search
+   field rather than a form input. */
+[data-testid="stSidebar"] [data-testid="stTextInput"] input {{
+    border-radius: 999px;
+    border: 1px solid {PALETTE['pink_soft']};
+    background: #fff;
+    padding: 0.55rem 1rem;
+    font-size: 0.92rem;
+    box-shadow: 0 2px 10px rgba(231, 80, 143, 0.10);
+}}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {{
+    border-color: {PALETTE['pink']};
+    box-shadow: 0 0 0 3px rgba(231, 80, 143, 0.14);
+}}
 
 /* ---- containers ---- */
 [data-testid="stExpander"] {{
@@ -372,22 +409,31 @@ def render_results(state: dict) -> None:
                 analysis = analyze(state["url"])
         state["analysis"] = analysis
 
-    passed = sum(1 for r in reviews if r.passed)
-    claims = sum(r.claims_checked for r in reviews)
+    # Metrics about the reader's repository, not about our checking of it.
+    # "41 claims fact-checked" describes this tool's machinery, which is not
+    # what someone came here to learn. Verification still runs and still
+    # rewrites bad sections; it just no longer has a scoreboard.
     errors = sum(len(r.errors) for r in reviews)
+    files = len({s.file for s in analysis.symbols.values()}) if analysis else 0
+    deps = len(manifest.read_manifest(analysis.root, []).dependencies) if analysis else 0
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Sections that held up", f"{passed}/{len(reviews)}")
-    c2.metric("Claims fact-checked", claims)
-    c3.metric("Still wrong", errors)
-    c4.metric("Functions read", len(analysis.symbols) if analysis else "—")
+    c1.metric("Functions and classes", len(analysis.symbols) if analysis else "—")
+    c2.metric("Source files", files or "—")
+    c3.metric("Calls mapped", len(analysis.edges) if analysis else "—")
+    c4.metric("Dependencies", deps if deps else "none")
 
     doc = build_document(analysis, repo_map, draft, reviews) if analysis else None
 
     tabs = st.tabs(["Documentation", "Ask", "Getting started", "Architecture",
-                    "Verification", "Symbols", "Limits"])
+                    "Symbols", "Limits"])
 
     with tabs[0]:
+        # Silence would be worse than a scoreboard: if a claim is known to be
+        # wrong, say so here rather than hiding it with the report.
+        if errors:
+            st.warning(f"{errors} statement(s) below could not be squared with "
+                       f"the source. They are marked in the downloaded file.")
         for s in draft.sections:
             st.subheader(s.heading)
             st.markdown(s.body)
@@ -511,16 +557,24 @@ def render_results(state: dict) -> None:
                     "put here.")
 
     with tabs[3]:
+        flow = graphviz_phase_flow(analysis, repo_map) if analysis else ""
         mods = graphviz_module_graph(analysis) if analysis else ""
         dot = graphviz_call_graph(analysis, repo_map.notes) if analysis else ""
 
+        # Flow first. A file graph tells you where code lives, which means
+        # nothing if you have never heard of ctx.py. This says what happens.
+        if flow:
+            st.markdown("**What happens, in order**")
+            st.caption("The main path through this project, from the way in. "
+                       "The order comes from the real call graph.")
+            st.graphviz_chart(flow, use_container_width=False)
+
         if mods:
+            st.divider()
             n = len(module_edges(analysis))
             st.markdown("**Which files depend on which**")
             st.caption(f"{n} relationships. The number on each arrow counts how "
-                       f"many calls cross that boundary, and thicker means more. "
-                       f"Read the heavy arrows first: that is where the work "
-                       f"flows.")
+                       f"many calls cross that boundary, and thicker means more.")
             st.graphviz_chart(mods, use_container_width=False)
 
         if dot:
@@ -533,49 +587,32 @@ def render_results(state: dict) -> None:
             # column, which blows a small graph up to unreadable proportions.
             st.graphviz_chart(dot, use_container_width=False)
 
-        if mods or dot:
-            with st.expander("Want the Mermaid version for your README?"):
-                if mods:
-                    st.code(mermaid_module_graph(analysis), language="text")
-                if dot:
-                    st.code(mermaid_call_graph(analysis, repo_map.notes),
-                            language="text")
-        else:
+        if not (flow or mods or dot):
             st.info("No calls were resolved between these functions, so there "
                     "is no flow worth drawing. Nudge the coverage slider up and "
                     "the picture usually appears.")
 
     with tabs[4]:
-        st.caption("Sentence by sentence, checked against the code. This is the "
-                   "bit most generated documentation quietly skips.")
-        for r in reviews:
-            icon = "✅" if r.passed else "⚠️"
-            with st.expander(f"{icon} {r.heading} — {r.claims_checked} claims, "
-                             f"{len(r.errors)} errors"):
-                if not r.issues:
-                    st.success("Everything here matches the source. No notes.")
-                for i in r.errors:
-                    st.error(f"**{i.kind}** — {i.detail}")
-                    if i.quote:
-                        st.caption(f"From: “{i.quote.strip()[:200]}”")
-                for i in r.warnings:
-                    st.warning(f"**{i.kind}** — {i.detail}")
-
-    with tabs[5]:
         st.dataframe(
             [{"Symbol": n.qualname.split(".")[-1], "Kind": n.kind, "Role": n.role,
               "Location": f"{n.file}:{n.start_line}", "Score": n.score,
               "Purpose": n.purpose} for n in repo_map.notes],
             use_container_width=True, hide_index=True)
 
-    with tabs[6]:
+    with tabs[5]:
+        # This repo's rough edges, not ours. Ours stay in the downloaded file,
+        # where someone judging the document benefits from them.
         if analysis is not None:
-            st.caption("Where this tool stops being certain. Every number here "
-                       "is counted, not estimated.")
-            st.markdown(limitations(analysis, repo_map, reviews))
+            from agents.mapper import public_api_names
+            from insights import repo_limits
+
+            st.caption("What to know about this codebase before you rely on it. "
+                       "Every number is counted from the source.")
+            st.markdown(repo_limits(analysis, public_api_names(analysis))
+                        .as_markdown())
         else:
-            st.info("The source is not available locally, so coverage cannot "
-                    "be measured.")
+            st.info("The source is not available locally, so this cannot be "
+                    "measured.")
 
 
 st.markdown(STYLE, unsafe_allow_html=True)
@@ -594,8 +631,10 @@ st.markdown(
 
 with st.sidebar:
     st.markdown(SIDEBAR_FLOWERS, unsafe_allow_html=True)
-    st.header("Run")
-    url = st.text_input("GitHub repo URL", "https://github.com/pallets/flask")
+    st.header("let him cook")
+    url = st.text_input("repo", "https://github.com/pallets/flask",
+                        placeholder="paste a github repo…",
+                        label_visibility="collapsed")
     top = st.slider("How many functions to cover", 5, 30, 8,
                     help="More coverage, more waiting. Eight is a good first look.")
     max_rounds = st.slider("Rewrite attempts", 0, 3, 2,
@@ -603,19 +642,19 @@ with st.sidebar:
                                 "we stop arguing with it.")
     reuse = st.checkbox("Reuse earlier analysis", value=True,
                         help="Skips the slow reading step for a repo you have "
-                             "already run. Leave this on.")
+                             "already run. It also ignores the slider above, so "
+                             "untick it if you just changed that.")
 
     go = st.button("Explain this codebase", type="primary",
                    use_container_width=True)
 
-    st.divider()
-    st.caption("**Models**")
+    # Only surfaced when something is actually wrong. Which models this tool
+    # runs on is our plumbing, not the reader's problem.
     try:
         installed = available_models()
-        st.caption(f"code: `{CODE_MODEL}`" + ("" if CODE_MODEL in installed
-                                              else " ⚠️ not installed"))
-        st.caption(f"prose: `{PROSE_MODEL}`" + ("" if PROSE_MODEL in installed
-                                                else " ⚠️ not installed"))
+        missing = [m for m in (CODE_MODEL, PROSE_MODEL) if m not in installed]
+        if missing:
+            st.warning("Model not installed: " + ", ".join(f"`{m}`" for m in missing))
     except LLMError as exc:
         st.error(str(exc).split("\n")[0])
 

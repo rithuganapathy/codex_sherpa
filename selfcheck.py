@@ -657,6 +657,18 @@ def check_manifest(check) -> None:
         check("render marks the install as quoted", "quoted from README.md" in out, True)
         check("render includes the entry point", "demolib.cli:main" in out, True)
 
+        # Ordered steps, not a pile of facts: version, install, run, ways in,
+        # check. A reader should be able to follow it top to bottom.
+        steps = re.findall(r"^### (\d+)\. (.+)$", out, re.M)
+        check("steps are numbered from 1 with no gaps",
+              [int(n) for n, _ in steps], list(range(1, len(steps) + 1)))
+        check("version check comes before install",
+              [t for _, t in steps][:2],
+              ["Check your Python version", "Install it"])
+        check("running something comes after installing",
+              [t for _, t in steps].index("Run the smallest thing that works") > 1,
+              True)
+
         # A bare repo must produce nothing rather than an invented section.
         bare = Path(tmp) / "bare"
         bare.mkdir()
@@ -736,6 +748,73 @@ def check_alternatives(check) -> None:
             urllib.request.urlopen = old_open
 
 
+def check_insights(a, check) -> None:
+    """The repo's own rough edges. Counted, never estimated."""
+    from insights import repo_limits, unused
+
+    limits = repo_limits(a, set())
+    labels = " | ".join(f.label for f in limits.findings)
+
+    check("undocumented functions are counted", "docstring" in labels, True)
+    check("test suite is reported", "test suite" in labels.lower(), True)
+    # Problems belong above clean results, or the page opens with good news.
+    goods = [i for i, f in enumerate(limits.findings) if f.good]
+    bads = [i for i, f in enumerate(limits.findings) if not f.good]
+    check("problems come before clean results",
+          (not goods or not bads or max(bads) < min(goods)), True)
+
+    # A public method with no in-repo callers is the library's API, not dead
+    # code. Counting those reported 121 "unused" functions in flask.
+    u = unused(a, set())
+    named = u.detail if u and not u.good else ""
+    check("public functions are not called unused", "helper" in named, False)
+    check("nothing is flagged unused in this sample", u.good if u else True, True)
+
+
+def check_phase_flow(a, check) -> None:
+    """The ordered view: steps follow real calls, labels are plain English."""
+    from agents.mapper import RepoMap, rank_symbols
+    from aggregator import _short_purpose, markdown_phase_flow, phase_flow
+
+    # What matters is not ending ON a preposition. Cutting at every preposition
+    # would wreck "Inserts multiple records into a SQLite table", which is a
+    # perfectly good label.
+    trailing = ("into", "to", "for", "with", "by", "of", "a", "an", "the")
+    for purpose in ("Converts a view function's return value into an instance",
+                    "Inserts multiple records into a SQLite table by batching",
+                    "Handles a WSGI request"):
+        label = _short_purpose(purpose)
+        check(f"label does not end on a preposition: {label!r}",
+              label.split()[-1].lower() in trailing, False)
+    check("a short purpose survives whole",
+          _short_purpose("Handles a WSGI request"), "Handles a WSGI request")
+    check("a longer purpose keeps its object",
+          _short_purpose("Inserts multiple records into a SQLite table by batching"),
+          "Inserts multiple records into a SQLite table")
+
+    notes = rank_symbols(a, 6)
+    for n in notes:
+        n.purpose = f"Does the {n.qualname.split('.')[-1]} work"
+    m = RepoMap(repo="sample", root=str(a.root), model="m",
+                total_symbols=len(a.symbols), total_edges=len(a.edges),
+                entry_points=[], components=[], notes=notes)
+
+    phases = phase_flow(a, m)
+    check("the flow has more than one step", len(phases) > 1, True)
+    check("steps are numbered in order",
+          [p.number for p in phases], list(range(1, len(phases) + 1)))
+    # Each step must be reachable from the one before, or the order is invented.
+    for prev, nxt in zip(phases, phases[1:]):
+        reachable = {c for q in prev.symbols for c in a.callees(q)}
+        check(f"step {nxt.number} follows a real call from step {prev.number}",
+              bool(set(nxt.symbols) & reachable), True)
+    check("no symbol appears in two steps",
+          len({q for p in phases for q in p.symbols}),
+          sum(len(p.symbols) for p in phases))
+    check("markdown flow is numbered", markdown_phase_flow(a, m).startswith("1. "),
+          True)
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -776,6 +855,8 @@ def main() -> int:
     check_aggregator(a, check)
     check_manifest(check)
     check_alternatives(check)
+    check_insights(a, check)
+    check_phase_flow(a, check)
 
     if failures:
         print(f"FAIL ({len(failures)})")

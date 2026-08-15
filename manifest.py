@@ -165,24 +165,39 @@ def read_manifest(root: Path, py_files: list[Path] | None = None) -> Manifest:
 
 
 def render(m: Manifest) -> str:
-    """Markdown for the Getting started section. Empty if nothing was found."""
+    """The Getting started section, as steps in the order you would do them.
+
+    A list of loose facts (version, deps, entry points) left the reader to
+    assemble the order themselves. These are the same facts, arranged as the
+    path from nothing installed to something running.
+    """
     if not m.found_anything:
         return ""
+
+    step = 0
+
+    def head(title: str, note: str = "") -> list[str]:
+        nonlocal step
+        step += 1
+        line = f"### {step}. {title}"
+        return ["", line, ""] + ([f"<sub>{note}</sub>", ""] if note else [])
 
     out: list[str] = [
         "Taken directly from the repository's own files, not written by a "
         "model. Anything quoted below is quoted, not paraphrased."
     ]
 
+    # 1 — check you can run it at all
     if m.python_requires:
-        out += ["", f"**Requires Python** `{m.python_requires}`"]
+        out += head("Check your Python version")
+        out += [f"This project needs Python `{m.python_requires}`.", "",
+                "```bash", "python --version", "```"]
 
+    # 2 — install
     if m.install_cmds:
-        out += ["", "**Install**", "", "```bash", *m.install_cmds, "```",
-                f"<sub>quoted from {m.readme}</sub>"]
+        out += head("Install it", f"quoted from {m.readme}")
+        out += ["```bash", *m.install_cmds, "```"]
     elif m.dependencies or m.name:
-        # No install line in the README. Say where the guess comes from rather
-        # than presenting it as something the project documented.
         if m.dep_source == "requirements.txt":
             cmd, note = (f"pip install -r {m.dep_source}",
                          f"inferred from {m.dep_source}")
@@ -192,29 +207,38 @@ def render(m: Manifest) -> str:
                          "the README gives no install command")
         else:
             cmd, note = "pip install .", "inferred, for a local checkout"
-        out += ["", "**Install**", "", "```bash", cmd, "```", f"<sub>{note}</sub>"]
+        out += head("Install it", note)
+        out += ["```bash", cmd, "```"]
 
     if m.dependencies:
         shown = ", ".join(f"`{d}`" for d in m.dependencies)
-        more = (f" and {m.total_deps - len(m.dependencies)} more"
+        more = (f", and {m.total_deps - len(m.dependencies)} more"
                 if m.total_deps > len(m.dependencies) else "")
-        out += ["", f"**Depends on** ({m.dep_source}): {shown}{more}"]
+        out += ["", f"That pulls in {shown}{more}. Names you meet in the source "
+                    f"that are not in the list above usually come from these.",
+                f"<sub>from {m.dep_source}</sub>"]
 
-    if m.console_scripts:
-        out += ["", "**Command-line entry points**", ""]
-        out += [f"- `{k}` runs `{v}`" for k, v in sorted(m.console_scripts.items())]
-
-    if m.runnable_modules:
-        out += ["", "**Files you can run directly**", ""]
-        out += [f"- `{f}`" for f in m.runnable_modules]
-
+    # 3 — the smallest thing that works
     if m.usage_block:
-        out += ["", f"**Example from {m.readme or 'the README'}**", "",
-                f"```{m.usage_lang}", m.usage_block, "```"]
+        out += head("Run the smallest thing that works",
+                    f"quoted from {m.readme or 'the README'}")
+        out += [f"```{m.usage_lang}", m.usage_block, "```"]
 
+    # 4 — the ways in
+    if m.console_scripts or m.runnable_modules:
+        out += head("Know the ways in")
+        if m.console_scripts:
+            out += [f"- `{k}` on your command line runs `{v}`"
+                    for k, v in sorted(m.console_scripts.items())]
+        if m.runnable_modules:
+            out += [f"- `{f}` can be run directly" for f in m.runnable_modules]
+
+    # 5 — prove the setup
     if m.has_tests:
-        out += ["", "The repository ships a test suite, so `pytest` is usually "
-                    "the fastest way to confirm your setup works."]
+        out += head("Check your setup is sound")
+        out += ["The project ships tests, which is the quickest way to find out "
+                "whether it works on your machine before you blame your own "
+                "code.", "", "```bash", "pytest", "```"]
     return "\n".join(out)
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import manifest
@@ -124,6 +125,134 @@ def graphviz_call_graph(analysis: Analysis, notes: list[SymbolNote],
         lines.append(f"    {_node_id(a)} -> {_node_id(b)};")
     lines.append("}")
     return "\n".join(lines)
+
+
+MAX_PHASES = 6
+
+
+@dataclass
+class Phase:
+    number: int
+    title: str            # plain English, no filenames
+    symbols: list[str]    # qualnames, in the order they are reached
+    detail: str = ""
+
+
+# Cutting a purpose at N words strands the sentence on a preposition:
+# "Converts a view function's return value into". Drop these from the end.
+_TRAILING = {"into", "to", "for", "with", "by", "of", "a", "an", "the", "and",
+             "or", "in", "on", "from", "as", "that", "which", "it", "its"}
+
+
+def _short_purpose(text: str, words: int = 7) -> str:
+    """First clause of a Mapper purpose, as a label rather than a sentence."""
+    clause = re.split(r"[,.;]| by | which | that ", text.strip(), maxsplit=1)[0]
+    parts = clause.split()[:words]
+    while parts and parts[-1].lower().strip(".,'\"") in _TRAILING:
+        parts.pop()
+    out = " ".join(parts).rstrip(" .,")
+    return out[0].upper() + out[1:] if out else ""
+
+
+def phase_flow(analysis: Analysis, repo_map: RepoMap,
+               max_phases: int = MAX_PHASES) -> list[Phase]:
+    """The order things happen in, starting from the way in.
+
+    A file-dependency graph shows where code lives, which is no help to someone
+    who has never heard of `ctx.py`. This follows the real call chain outwards
+    from the entry point and names each step in plain English, using the
+    purposes the Mapper already wrote. Order and arrows still come from the
+    source; only the labels come from the model, and they were written earlier.
+    """
+    by_qual = {n.qualname: n for n in repo_map.notes}
+    if not by_qual:
+        return []
+
+    def reach(qual: str, hops: int) -> tuple[int, int]:
+        """(steps deep, symbols reached) within the phase budget."""
+        seen_r, layer_r, depth = {qual}, [qual], 0
+        for _ in range(hops):
+            nxt = [c for q in layer_r for c in analysis.callees(q)
+                   if c not in seen_r]
+            if not nxt:
+                break
+            seen_r.update(nxt)
+            layer_r = nxt
+            depth += 1
+        return depth, len(seen_r)
+
+    def score(note) -> tuple[int, int, float]:
+        # Depth first. The main flow of a program is its longest chain, not its
+        # highest-ranked function: on flask, ranking picked url_for, which is a
+        # two-step detour, over the wsgi_app request pipeline.
+        depth, size = reach(note.qualname, max_phases)
+        bonus = {"entry point": 1.0, "orchestrator": 2.0}.get(note.role, 0.0)
+        return depth, size, note.score / 100 + bonus
+
+    start = max((n for n in repo_map.notes if analysis.callees(n.qualname)),
+                key=score, default=None)
+    if start is None:
+        return []
+
+    phases: list[Phase] = []
+    seen = {start.qualname}
+    layer = [start.qualname]
+
+    while layer and len(phases) < max_phases:
+        lead = by_qual.get(layer[0])
+        title = _short_purpose(lead.purpose) if lead and lead.purpose else ""
+        if not title:
+            title = layer[0].split(".")[-1].replace("_", " ").capitalize()
+        phases.append(Phase(
+            number=len(phases) + 1,
+            title=title,
+            symbols=list(layer),
+            detail=lead.purpose if lead else "",
+        ))
+
+        nxt: list[str] = []
+        for q in layer:
+            for callee in analysis.callees(q):
+                if callee not in seen:
+                    seen.add(callee)
+                    nxt.append(callee)
+        # Described symbols first: they are the ones with a usable label.
+        nxt.sort(key=lambda q: (q not in by_qual, q))
+        layer = nxt[:4]
+    return phases
+
+
+def graphviz_phase_flow(analysis: Analysis, repo_map: RepoMap) -> str:
+    phases = phase_flow(analysis, repo_map)
+    if len(phases) < 2:
+        return ""
+
+    lines = ["digraph flow {", "    rankdir=TB;", '    bgcolor="transparent";',
+             '    graph [size="6.5,7", ratio=compress, nodesep=0.2, '
+             'ranksep=0.45, fontname="Helvetica"];',
+             '    node [shape=box, style="rounded,filled", fillcolor="#FDE7F1", '
+             'fontname="Helvetica", fontsize=11, color="#E7508F", '
+             'fontcolor="#4A2C40", penwidth=1.5, margin="0.18,0.10"];',
+             '    edge [color="#A87BD4", arrowsize=0.9, penwidth=1.6];']
+    for p in phases:
+        names = ", ".join(q.split(".")[-1] for q in p.symbols[:3])
+        label = f"{p.number}. {p.title}\\n{names}"
+        lines.append(f'    step{p.number} [label="{label}"];')
+    for p in phases[:-1]:
+        lines.append(f"    step{p.number} -> step{p.number + 1};")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def markdown_phase_flow(analysis: Analysis, repo_map: RepoMap) -> str:
+    phases = phase_flow(analysis, repo_map)
+    if len(phases) < 2:
+        return ""
+    out = []
+    for p in phases:
+        names = ", ".join(f"`{q.split('.')[-1]}`" for q in p.symbols[:3])
+        out.append(f"{p.number}. **{p.title}** — {names}")
+    return "\n".join(out)
 
 
 def graphviz_module_graph(analysis: Analysis,
