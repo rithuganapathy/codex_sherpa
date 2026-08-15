@@ -658,17 +658,17 @@ with st.sidebar:
     except LLMError as exc:
         st.error(str(exc).split("\n")[0])
 
-    cached = cached_repos()
-    if cached:
-        st.divider()
-        st.caption("**Already done earlier**")
-        pick = st.selectbox("Open one without the wait", ["—"] + cached)
-        if pick != "—" and st.button("Load", use_container_width=True):
-            loaded = load_cached(pick)
+    # No standing list of past runs. It only matters when the repo in the box
+    # happens to be one already done, so it appears then and stays out of the
+    # way otherwise.
+    _name = repo_name(url) if url.strip() else ""
+    if _name and _name in cached_repos():
+        if st.button(f"Open the saved {_name} instead", use_container_width=True):
+            loaded = load_cached(_name)
             if loaded:
                 st.session_state["result"] = loaded
             else:
-                st.error(f"Incomplete artefacts for {pick}")
+                st.error(f"Incomplete artefacts for {_name}")
 
     st.divider()
     st.caption("Give it a few minutes. Both models run on your own machine, so "
@@ -702,7 +702,8 @@ if "result" in st.session_state:
     render_results(st.session_state["result"])
 else:
     st.info("Paste a repo URL in the sidebar and press **Explain this codebase**. "
-            "Or load something you ran earlier, which is considerably quicker.")
+            "If you have run that repo before, a second button appears offering "
+            "the saved copy, which is instant.")
     st.markdown(
         "#### How it works\n"
         "The repo gets cloned and parsed into a call graph: who calls whom, "
@@ -714,6 +715,6 @@ else:
         "*Does `wsgi_app` really call `full_dispatch_request`?* If not, the "
         "sentence goes back for a rewrite.\n\n"
         "Which means the thing you read at the end has already had an argument "
-        "with itself, and lost a few rounds. The receipts are in the "
-        "**Verification** tab."
+        "with itself, and lost a few rounds. That happens quietly, and the full "
+        "record of what was checked comes with the downloaded file."
     )
