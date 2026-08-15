@@ -32,7 +32,7 @@ from agents.writer import Section  # noqa: E402
 from analyze import Analysis, analyze  # noqa: E402
 from embed import build_index, has_index, search  # noqa: E402
 from examples import Example, find_examples, render as render_examples  # noqa: E402
-from llm import CODE_MODEL, STATS, chat  # noqa: E402
+from llm import CODE_MODEL, STATS, chat_json  # noqa: E402
 
 # Parsing a repo's test files takes a second or two. Questions come in batches,
 # so keep the parsed result for the life of the process.
@@ -44,18 +44,36 @@ MAX_SOURCE_CHARS = 1400
 DEFAULT_K = 5
 
 SYSTEM = (
-    "You answer questions about a codebase using only the source code you are "
-    "shown. You are talking to someone who does not know this project.\n"
+    "You help someone understand an unfamiliar codebase. They may ask how this "
+    "project works, or they may ask about a technology it uses. Answer both "
+    "kinds, and be clear about which one you are doing.\n"
     "\n"
-    "RULES:\n"
-    "- Answer ONLY from the code provided. If it does not contain the answer, "
-    "say so plainly and name what you would need to look at instead. A short "
-    "honest answer beats a confident wrong one.\n"
-    "- Lead with the direct answer in one or two sentences. Details after.\n"
-    "- Name real functions in backticks. Never invent a name.\n"
-    "- Only say A calls B if you can see that call in the code shown.\n"
-    "- Plain words, short sentences. No em dashes. Under 150 words."
+    "TWO KINDS OF QUESTION:\n"
+    "1. About THIS project: how something works here, what a function does, "
+    "where something happens. Answer from the source code shown, and set "
+    "used_repo_code to true. Name real functions in backticks. Only say A "
+    "calls B if you can see that call. If the code shown does not cover it, "
+    "say so and name what to look at instead.\n"
+    "2. Background: what a technology is, what a term means, why something is "
+    "used. Answer from your general knowledge and set used_repo_code to false. "
+    "Do NOT refuse just because it is not in the code. A reader asking 'what "
+    "is SQLite' wants a real answer.\n"
+    "\n"
+    "Where both apply, answer the background first in a sentence or two, then "
+    "connect it to this project, and set used_repo_code to true.\n"
+    "\n"
+    "STYLE: plain words, short sentences, under 150 words, no em dashes. "
+    "Never invent a function, file or class name."
 )
+
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "answer": {"type": "string"},
+        "used_repo_code": {"type": "boolean"},
+    },
+    "required": ["answer", "used_repo_code"],
+}
 
 
 @dataclass
@@ -65,6 +83,18 @@ class Answer:
     sources: list[dict] = field(default_factory=list)
     review: Review | None = None
     examples: list[Example] = field(default_factory=list)
+    from_source: bool = True  # False when answered from general knowledge
+
+    @property
+    def provenance(self) -> str:
+        """Where this answer came from. Shown to the reader, never guessed at."""
+        if not self.from_source:
+            return "general knowledge, not checked against this repository"
+        if self.review is None:
+            return "read from the source, unverified"
+        return ("read from the source and checked against the call graph"
+                if self.review.passed else
+                "read from the source, but some claims failed the check")
 
     @property
     def verified(self) -> bool:
@@ -116,40 +146,67 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
         return Answer(question, "Nothing in this repository looks related to "
                                 "that question.", [], None)
 
+    # The project's own one-line description, from pyproject.toml. It is what
+    # lets a background question still be answered in context: "SQLite is an
+    # embedded database, and this project is a CLI for manipulating them."
+    try:
+        from manifest import read_manifest
+
+        blurb = read_manifest(analysis.root, []).summary
+    except Exception:
+        blurb = ""
+
     prompt = (
+        f"Repository: {analysis.root.name}"
+        + (f" — {blurb}" if blurb else "") + "\n\n"
         f"Question: {question}\n\n"
-        f"Here is the most relevant code from the repository:\n\n"
+        f"The most relevant code in this repository:\n\n"
         f"{_context(hits, analysis)}\n\n"
-        f"Answer the question using only the code above."
+        f"Answer the question. If it is about this project, answer from the "
+        f"code above. If it is a background question about a technology, "
+        f"answer it properly from what you know instead of refusing."
     )
-    text = chat(prompt, system=SYSTEM, model=model, temperature=0.1).text
+    data, _ = chat_json(prompt, system=SYSTEM, model=model,
+                        schema=ANSWER_SCHEMA, temperature=0.1)
+    text = str(data.get("answer", "")).strip()
+    from_source = bool(data.get("used_repo_code", True))
 
     # An explanation says what something is for. An example shows what calling
     # it looks like, which is usually the thing that makes it click. Prefer a
     # symbol the answer actually talked about over the top search hit.
-    mentioned = {m.strip().split(".")[-1].rstrip("()")
-                 for m in re.findall(r"`([^`\n]+)`", text)}
-    candidates = [h["qualname"] for h in hits
-                  if h["qualname"].split(".")[-1] in mentioned]
-    candidates += [h["qualname"] for h in hits if h["qualname"] not in candidates]
-
+    #
+    # Only for answers about this project. "What is the difference between TCP
+    # and UDP" once came back with a send_from_directory test attached, because
+    # retrieval still returned its best guess at 0.14 and the example was shown
+    # regardless. An unrelated example is worse than none.
     found: list[Example] = []
-    for qual in candidates[:4]:
-        found = find_examples(analysis.root, qual, cache=_TEST_CACHE)
-        if found:
-            break
+    if from_source:
+        mentioned = {m.strip().split(".")[-1].rstrip("()")
+                     for m in re.findall(r"`([^`\n]+)`", text)}
+        candidates = [h["qualname"] for h in hits
+                      if h["qualname"].split(".")[-1] in mentioned]
+        candidates += [h["qualname"] for h in hits
+                       if h["qualname"] not in candidates]
+
+        for qual in candidates[:4]:
+            found = find_examples(analysis.root, qual, cache=_TEST_CACHE)
+            if found:
+                break
 
     review = None
-    if verify:
+    if verify and from_source:
         # Same verification path the documentation goes through: claims are
         # extracted, then checked against the call graph rather than judged.
+        # Skipped for background answers: there is nothing in the call graph
+        # that could confirm or deny what SQLite is, and running the check
+        # anyway would dress general knowledge up as verified.
         review = review_section(
             Section(key="answer", heading=question[:60], body=text,
                     kind="component",
                     allowed=[h["qualname"] for h in hits]),
             analysis, model)
 
-    return Answer(question, text, hits, review, found)
+    return Answer(question, text, hits, review, found, from_source)
 
 
 def _print(a: Answer) -> None:
@@ -165,12 +222,14 @@ def _print(a: Answer) -> None:
         for line in e.source.splitlines()[:20]:
             print(f"  {line}")
 
-    print("\nSources (what the answer was allowed to read):")
-    for s in a.sources:
-        print(f"  {s['score']:.3f}  {s['qualname']}  ({s['file']}:{s['start_line']})")
+    if a.from_source:
+        print("\nSources (what the answer was allowed to read):")
+        for s in a.sources:
+            print(f"  {s['score']:.3f}  {s['qualname']}  "
+                  f"({s['file']}:{s['start_line']})")
 
+    print(f"\nSource of this answer: {a.provenance}")
     if a.review is None:
-        print("\n[unverified]")
         return
     if a.verified:
         print(f"\nVERIFIED  {a.review.claims_checked} claims checked against "
