@@ -38,20 +38,60 @@ def _label(qualname: str) -> str:
     return ".".join(parts[-2:]) if len(parts) > 1 else qualname
 
 
+MAX_MODULE_EDGES = 18
+
+
+def module_edges(analysis: Analysis, max_edges: int = MAX_MODULE_EDGES
+                 ) -> list[tuple[str, str, int]]:
+    """File-to-file call relationships, heaviest first, as (from, to, count).
+
+    This is the view that actually answers "how is this laid out". A repo can
+    have 600 functions and still only a dozen files that talk to each other.
+    """
+    from collections import Counter
+
+    counts: Counter[tuple[str, str]] = Counter()
+    for src, dst in analysis.edges:
+        a, b = analysis.symbols[src].file, analysis.symbols[dst].file
+        if a != b:
+            counts[(a, b)] += 1
+    return [(a, b, n) for (a, b), n in counts.most_common(max_edges)]
+
+
 def _diagram_data(analysis: Analysis, notes: list[SymbolNote], max_nodes: int
                   ) -> tuple[dict[str, list[str]], list[tuple[str, str]]]:
     """Pick the nodes and edges both diagram formats draw.
 
-    Only symbols that actually connect are kept. An isolated box teaches a
-    reader nothing, and a diagram is worth showing only if it shows flow.
+    Seeded with the ranked symbols, then grown outwards along real calls. The
+    ranked symbols alone are usually a poor graph: on click, only 2 of the top 8
+    called each other, so the picture was two boxes and one arrow. Their
+    immediate neighbours are what turn it into something worth looking at.
     """
-    ranked = [n.qualname for n in notes][:max_nodes]
-    chosen = set(ranked)
-    edges = [(a, b) for a, b in analysis.edges if a in chosen and b in chosen]
+    # Seeds are capped too. Without this the ranked list alone can already
+    # exceed the budget, and nothing below would bring it back down.
+    chosen: list[str] = []
+    for q in (n.qualname for n in notes):
+        if q not in chosen and len(chosen) < max_nodes:
+            chosen.append(q)
 
+    # Grow one hop at a time so the nearest neighbours win the remaining slots.
+    frontier = list(chosen)
+    while len(chosen) < max_nodes and frontier:
+        nxt: list[str] = []
+        for q in frontier:
+            for neighbour in analysis.callees(q) + analysis.callers(q):
+                if neighbour not in chosen and len(chosen) < max_nodes:
+                    chosen.append(neighbour)
+                    nxt.append(neighbour)
+        frontier = nxt
+
+    picked = set(chosen)
+    edges = [(a, b) for a, b in analysis.edges if a in picked and b in picked]
+
+    # An isolated box teaches a reader nothing.
     connected = {q for e in edges for q in e}
     by_file: dict[str, list[str]] = {}
-    for q in ranked:
+    for q in chosen:
         if q in connected:
             by_file.setdefault(analysis.symbols[q].file, []).append(q)
     return by_file, sorted(edges)
@@ -83,6 +123,43 @@ def graphviz_call_graph(analysis: Analysis, notes: list[SymbolNote],
     for a, b in edges:
         lines.append(f"    {_node_id(a)} -> {_node_id(b)};")
     lines.append("}")
+    return "\n".join(lines)
+
+
+def graphviz_module_graph(analysis: Analysis,
+                          max_edges: int = MAX_MODULE_EDGES) -> str:
+    """The file-level view, with arrow weight showing how much traffic flows."""
+    edges = module_edges(analysis, max_edges)
+    if not edges:
+        return ""
+
+    heaviest = max(n for _, _, n in edges)
+    lines = ["digraph modules {", "    rankdir=LR;", '    bgcolor="transparent";',
+             '    graph [size="7.5,5", ratio=compress, nodesep=0.25, '
+             'ranksep=0.7, fontname="Helvetica"];',
+             '    node [shape=box, style="rounded,filled", fillcolor="#F3E8FB", '
+             'fontname="Helvetica", fontsize=10, color="#A87BD4", '
+             'fontcolor="#4A2C40", penwidth=1.3];']
+    for a, b, n in edges:
+        # Thicker arrow means more calls cross that boundary.
+        width = 1.0 + 2.5 * (n / heaviest)
+        lines.append(f'    "{Path(a).name}" -> "{Path(b).name}" '
+                     f'[label=" {n}", penwidth={width:.1f}, '
+                     f'color="#E7508F", fontsize=8, fontcolor="#8A5C77"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def mermaid_module_graph(analysis: Analysis,
+                         max_edges: int = MAX_MODULE_EDGES) -> str:
+    edges = module_edges(analysis, max_edges)
+    if not edges:
+        return ""
+    lines = ["```mermaid", "graph LR"]
+    for a, b, n in edges:
+        lines.append(f"    {_node_id(a)}[\"{Path(a).name}\"] "
+                     f"-->|{n}| {_node_id(b)}[\"{Path(b).name}\"]")
+    lines.append("```")
     return "\n".join(lines)
 
 
@@ -309,16 +386,28 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
             parts += ["### If you cannot use these dependencies", "",
                       rendered, ""]
 
-    diagram = mermaid_call_graph(analysis, repo_map.notes)
     parts += ["## Architecture", ""]
+
+    modules = mermaid_module_graph(analysis)
+    if modules:
+        n_edges = len(module_edges(analysis))
+        parts += [
+            f"**Which files depend on which.** {n_edges} relationships, with "
+            f"the number on each arrow counting how many calls cross that "
+            f"boundary. Read the heaviest arrows first: they are where the "
+            f"work flows.",
+            "", modules, ""]
+
+    diagram = mermaid_call_graph(analysis, repo_map.notes)
     if diagram:
         parts += [
-            "Calls between the highest-ranked symbols, grouped by file. "
-            "Every arrow was extracted from the source, not inferred by a model.",
+            "**Down at the function level.** Starts from the most important "
+            "functions and follows their real calls outwards. Every arrow was "
+            "read off the source, not inferred by a model.",
             "", diagram, ""]
-    else:
-        parts += ["The highest-ranked symbols have no direct calls between "
-                  "them, so there is no flow to draw.", ""]
+    elif not modules:
+        parts += ["No calls were resolved between files, so there is no flow "
+                  "to draw.", ""]
 
     parts += ["## Symbol reference", "", symbol_reference(repo_map.notes), ""]
     parts += ["## Verification report", "", verification_report(reviews), ""]

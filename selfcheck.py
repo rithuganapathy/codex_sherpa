@@ -470,6 +470,21 @@ def check_aggregator(a, check) -> None:
     check("both formats draw the same edges",
           dot.count(" -> "), diagram.count(" --> "))
 
+    # The ranked symbols alone made a poor graph: on click only 2 of the top 8
+    # called each other, so the picture was two boxes and one arrow. The graph
+    # now grows outwards along real calls.
+    from aggregator import module_edges
+
+    seeded = mermaid_call_graph(a, notes[:1])
+    check("graph grows past its seed symbol",
+          seeded.count("-->") >= 2, True)
+    check("growth stays within max_nodes",
+          len(re.findall(r"^\s+n_\w+\[", mermaid_call_graph(a, notes, 4), re.M)) <= 4,
+          True)
+
+    mods = module_edges(a)
+    check("single-file sample has no cross-file edges", mods, [])
+
     reviews = [
         Review("a", "Alpha", True, 4, []),
         Review("b", "Beta", False, 3,

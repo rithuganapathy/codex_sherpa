@@ -20,8 +20,10 @@ from agents.critic import Review
 from agents.mapper import OUT_DIR, RepoMap
 from agents.writer import Draft
 import manifest
-from aggregator import (build_document, graphviz_call_graph, limitations,
-                        mermaid_call_graph)
+from aggregator import (build_document, graphviz_call_graph,
+                        graphviz_module_graph, limitations,
+                        mermaid_call_graph, mermaid_module_graph,
+                        module_edges)
 from analyze import analyze, analyze_files
 from graph import build_graph, save_outputs
 from ingest import list_python_files
@@ -493,19 +495,39 @@ def render_results(state: dict) -> None:
                     "put here.")
 
     with tabs[3]:
+        mods = graphviz_module_graph(analysis) if analysis else ""
         dot = graphviz_call_graph(analysis, repo_map.notes) if analysis else ""
+
+        if mods:
+            n = len(module_edges(analysis))
+            st.markdown("**Which files depend on which**")
+            st.caption(f"{n} relationships. The number on each arrow counts how "
+                       f"many calls cross that boundary, and thicker means more. "
+                       f"Read the heavy arrows first: that is where the work "
+                       f"flows.")
+            st.graphviz_chart(mods, use_container_width=False)
+
         if dot:
-            st.caption("Who calls whom, among the functions that matter most. "
-                       "Every arrow was read off the source. None were guessed.")
+            st.divider()
+            st.markdown("**Down at the function level**")
+            st.caption("Starts from the most important functions and follows "
+                       "their real calls outwards. Every arrow was read off the "
+                       "source. None were guessed.")
             # Not use_container_width: Streamlit stretches the SVG to the full
             # column, which blows a small graph up to unreadable proportions.
             st.graphviz_chart(dot, use_container_width=False)
+
+        if mods or dot:
             with st.expander("Want the Mermaid version for your README?"):
-                st.code(mermaid_call_graph(analysis, repo_map.notes), language="text")
+                if mods:
+                    st.code(mermaid_module_graph(analysis), language="text")
+                if dot:
+                    st.code(mermaid_call_graph(analysis, repo_map.notes),
+                            language="text")
         else:
-            st.info("The top functions here don't call each other, so there's no "
-                    "flow worth drawing. Nudge the coverage slider up and the "
-                    "picture usually appears.")
+            st.info("No calls were resolved between these functions, so there "
+                    "is no flow worth drawing. Nudge the coverage slider up and "
+                    "the picture usually appears.")
 
     with tabs[4]:
         st.caption("Sentence by sentence, checked against the code. This is the "
