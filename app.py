@@ -419,7 +419,16 @@ def render_results(state: dict) -> None:
 
             ans = st.session_state.get("answer")
             if ans:
-                if ans.verified:
+                # Three outcomes, not two. A background answer has no review at
+                # all, because nothing in a call graph can confirm what SQLite
+                # is. Assuming a review always existed crashed this tab.
+                if not ans.from_source:
+                    st.info("Answered from general knowledge. There is nothing "
+                            "in this repository to check it against, so it "
+                            "carries no verification.")
+                elif ans.review is None:
+                    st.warning("Read from the source, but not checked.")
+                elif ans.verified:
                     st.success(f"Verified: {ans.review.claims_checked} claims "
                                f"checked against the call graph, none "
                                f"contradicted the source.")
@@ -436,12 +445,15 @@ def render_results(state: dict) -> None:
 
                     st.markdown(render_examples(ans.examples))
 
-                with st.expander("What the answer was allowed to read"):
-                    st.caption("If these look unrelated to your question, "
-                               "distrust the answer no matter what the badge says.")
-                    for s in ans.sources:
-                        st.markdown(f"`{s['score']:.3f}`  `{s['qualname']}` "
-                                    f"— {s['file']}:{s['start_line']}")
+                # Sources are only meaningful when the answer came from them.
+                if ans.from_source and ans.sources:
+                    with st.expander("What the answer was allowed to read"):
+                        st.caption("If these look unrelated to your question, "
+                                   "distrust the answer no matter what the "
+                                   "badge says.")
+                        for s in ans.sources:
+                            st.markdown(f"`{s['score']:.3f}`  `{s['qualname']}` "
+                                        f"— {s['file']}:{s['start_line']}")
                 if ans.review and ans.review.warnings:
                     with st.expander(f"{len(ans.review.warnings)} thing(s) that "
                                      f"could not be checked"):
