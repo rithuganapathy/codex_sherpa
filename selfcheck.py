@@ -294,6 +294,19 @@ def check_critic(a, check) -> None:
         {"type": "calls", "subject": "inner", "object": "outer",
          "quote": "inner is defined inside outer"}), "clean")
 
+    # From a real click run: a sentence about what a module does became a call
+    # claim between two of its functions, naming neither.
+    check("call pair invented from a sentence naming neither is a warning", one(
+        {"type": "calls", "subject": "helper", "object": "shared",
+         "quote": "This module prints messages and formats filenames."}),
+        "warning/unverifiable")
+    check("naming just the caller is enough to judge it", one(
+        {"type": "calls", "subject": "helper", "object": "shared",
+         "quote": "helper does the work itself"}), "error/false-call")
+    check("naming just the callee is enough to judge it", one(
+        {"type": "calls", "subject": "helper", "object": "shared",
+         "quote": "it hands off to shared"}), "error/false-call")
+
     check("call to a symbol outside the repo is only a warning", one(
         {"type": "calls", "subject": "helper", "object": "requests_get",
          "quote": "helper calls requests_get"}), "warning/unverifiable")
@@ -382,8 +395,11 @@ def check_critic(a, check) -> None:
     check("equality is not read as an assignment",
           self_defined_names("```python\nif x == 1:\n    pass\n```"), set())
 
+    # The quote must name at least one of the pair, or the claim is treated as
+    # misattributed by extraction rather than as a false call.
     r = Review("k", "H", False, 2, verify_claims(
-        [{"type": "calls", "subject": "helper", "object": "shared", "quote": "q"}], a))
+        [{"type": "calls", "subject": "helper", "object": "shared",
+          "quote": "helper calls shared"}], a))
     check("feedback names the problem", "false-call" in r.feedback(), True)
     check("errors are separated from warnings", len(r.errors), 1)
 

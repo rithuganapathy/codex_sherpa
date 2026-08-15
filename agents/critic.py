@@ -199,6 +199,22 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
             # genuinely state a relationship backwards, which is exactly the
             # error this tool exists to catch. The containment rule above
             # already covers the real-world case that motivated it.
+            # If neither name appears in the sentence it came from, extraction
+            # built the pair rather than reading it. A real example from click:
+            # "This module helps print messages to files or the screen and
+            # formats filenames" became "echo calls format_filename", which the
+            # prose never said. The same guard already covers location claims.
+            short_subj = subject.split(".")[-1].lower()
+            short_obj = obj.split(".")[-1].lower()
+            quote_l = quote.lower()
+            if short_subj not in quote_l and short_obj not in quote_l:
+                issues.append(Issue(
+                    "unverifiable", "warning", subject,
+                    f"a call from {subject!r} to {obj!r} was extracted from a "
+                    f"sentence naming neither, so it cannot be attributed",
+                    quote))
+                continue
+
             real = sorted({x.split(".")[-1] for s in subj_quals
                            for x in analysis.callees(s)})
             issues.append(Issue(
