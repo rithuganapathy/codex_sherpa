@@ -273,10 +273,19 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
             if want_line is not None and str(want_line) not in quote:
                 want_line = None
 
-            # 3. If the subject is not in its own quote, extraction bound the
-            #    location to the wrong symbol (a line belonging to a neighbour).
-            #    Report it, but never as an error.
-            subj_in_quote = subject.split(".")[-1].lower() in quote.lower()
+            # 3. The subject and the location must appear in the SAME sentence,
+            #    not merely somewhere in the same quote. A real case: an answer
+            #    said "FlaskCliRunner is a CLI runner. The main function in
+            #    flask/cli.py is the entry point", and cli.py was attributed to
+            #    FlaskCliRunner across the full stop. It never claimed that.
+            subj_short = subject.split(".")[-1].lower()
+            obj_short = Path(bare).name.lower() or bare.lower()
+            sentences = re.split(r"(?<=[.!?])\s+", quote)
+            subj_in_quote = any(
+                subj_short in s.lower()
+                and (obj_short in s.lower() or bare.lower() in s.lower())
+                for s in sentences
+            ) or (subj_short in quote.lower() and len(sentences) <= 1)
 
             ok = False
             for q in subj_quals:

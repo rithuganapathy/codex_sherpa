@@ -323,6 +323,16 @@ def check_critic(a, check) -> None:
     check("line number absent from the quote is ignored", one(
         {"type": "location", "subject": "shared", "object": f"{sym.file}:999",
          "quote": f"shared lives in {sym.file}"}), "clean")
+    # Real case: an answer named FlaskCliRunner in one sentence and cli.py in
+    # the next, and the path was attributed to the class across the full stop.
+    check("location bound across a sentence boundary is not an error", one(
+        {"type": "location", "subject": "shared", "object": "other/place.py",
+         "quote": "The shared method is a helper. The main function in "
+                  "other/place.py is the entry point."}), "warning/unverifiable")
+    check("same sentence still fails when genuinely wrong", one(
+        {"type": "location", "subject": "shared", "object": "other/place.py",
+         "quote": "shared is defined in other/place.py"}), "error/wrong-location")
+
     check("location misbound to a neighbour downgrades to warning", one(
         {"type": "location", "subject": "helper", "object": f"{sym.file}:999",
          "quote": "the shared method (sample.py:999)"}), "warning/unverifiable")

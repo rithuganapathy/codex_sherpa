@@ -106,6 +106,11 @@ def ungrounded_names(section: Section, known: set[str]) -> list[str]:
         # `{"a": 1}`. Answers to questions are full of these.
         if any(c in token for c in "[]{}=,"):
             continue
+        # A leading dot means a filename or extension: `.env`, `.flaskenv`,
+        # `.gitignore`. Real files, never repository symbols, and they were
+        # being reported as invented API names because of the dot.
+        if token.startswith("."):
+            continue
         # `**kwargs` / `*args` are parameters written the way Python spells them.
         token = token.rstrip("()").lstrip("*").strip()
         if not token or _IGNORE_MENTION.search(token):
