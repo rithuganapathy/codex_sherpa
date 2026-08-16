@@ -17,6 +17,7 @@ import tree_sitter_python
 from tree_sitter import Language, Node, Parser
 
 from ingest import ingest
+from languages import LangSpec, docstring_of, spec_for
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 
@@ -39,6 +40,11 @@ BUILTINS = {
 }
 
 DEF_NODES = ("function_definition", "class_definition", "decorated_definition")
+# Same idea for JavaScript and TypeScript: a nested definition is its own
+# symbol, so its calls do not belong to the function that encloses it.
+JS_DEF_NODES = ("function_declaration", "class_declaration", "method_definition",
+                "generator_function_declaration", "abstract_class_declaration",
+                "interface_declaration")
 
 
 @dataclass
@@ -57,13 +63,15 @@ class Symbol:
     calls: list[tuple[str, str]] = field(default_factory=list)  # (simple, display)
     bases: list[str] = field(default_factory=list)  # class_definition only
     params: list[str] = field(default_factory=list)  # parameter names
+    exported: bool = False  # `export` in JS/TS; Python uses __init__.py
 
     @property
     def line_count(self) -> int:
         return self.end_line - self.start_line + 1
 
 
-def _collect_self_attrs(node: Node, acc: set[str]) -> None:
+def _collect_self_attrs(node: Node, acc: set[str],
+                        objects: tuple[str, ...] = ("self", "cls")) -> None:
     """Names assigned as `self.x = ...`, anywhere in the file.
 
     Instance attributes are not functions or classes, so they never entered the
@@ -72,14 +80,15 @@ def _collect_self_attrs(node: Node, acc: set[str]) -> None:
     """
     if node.type in ("assignment", "augmented_assignment"):
         left = node.child_by_field_name("left")
-        if left is not None and left.type == "attribute":
+        if left is not None and left.type in ("attribute", "member_expression"):
             obj = left.child_by_field_name("object")
-            attr = left.child_by_field_name("attribute")
+            attr = (left.child_by_field_name("attribute")
+                    or left.child_by_field_name("property"))
             if (obj is not None and attr is not None
-                    and obj.text.decode("utf8", "replace") in ("self", "cls")):
+                    and obj.text.decode("utf8", "replace") in objects):
                 acc.add(attr.text.decode("utf8", "replace"))
     for child in node.named_children:
-        _collect_self_attrs(child, acc)
+        _collect_self_attrs(child, acc, objects)
 
 
 @dataclass
@@ -102,12 +111,14 @@ class Analysis:
         return sorted({caller for caller, c in self.edges if c == qualname})
 
 
-def module_qualname(path: Path, root: Path) -> str:
-    """src/flask/app.py -> flask.app ; src/flask/json/__init__.py -> flask.json"""
+def module_qualname(path: Path, root: Path, spec: LangSpec | None = None) -> str:
+    """src/flask/app.py -> flask.app ; src/cordis/index.ts -> cordis"""
+    strips = spec.module_strips if spec else ("src", "lib")
     parts = list(path.relative_to(root).with_suffix("").parts)
-    if parts and parts[0] in ("src", "lib"):
+    while parts and parts[0] in strips:
         parts = parts[1:]
-    if parts and parts[-1] == "__init__":
+    # A package entry point adds nothing to the name of what is inside it.
+    if parts and parts[-1] in ("__init__", "index"):
         parts = parts[:-1]
     return ".".join(parts)
 
@@ -143,6 +154,9 @@ def _param_names(params: Node | None) -> list[str]:
         while node.type in (
             "typed_parameter", "default_parameter", "typed_default_parameter",
             "list_splat_pattern", "dictionary_splat_pattern",
+            # JavaScript / TypeScript
+            "required_parameter", "optional_parameter", "assignment_pattern",
+            "rest_pattern",
         ):
             inner = node.child_by_field_name("name")
             if inner is None:
@@ -162,8 +176,9 @@ def _call_name(fn: Node) -> tuple[str, str] | None:
     display = fn.text.decode("utf8", "replace")
     if fn.type == "identifier":
         return display, display
-    if fn.type == "attribute":
-        attr = fn.child_by_field_name("attribute")
+    if fn.type in ("attribute", "member_expression"):
+        attr = (fn.child_by_field_name("attribute")
+                or fn.child_by_field_name("property"))
         if attr is not None:
             return attr.text.decode("utf8", "replace"), display
     return None
@@ -172,10 +187,14 @@ def _call_name(fn: Node) -> tuple[str, str] | None:
 def _collect_calls(node: Node, acc: list[tuple[str, str]]) -> None:
     """Gather calls in this scope, stopping at nested def/class boundaries."""
     for child in node.named_children:
-        if child.type in DEF_NODES:
+        if child.type in DEF_NODES or child.type in JS_DEF_NODES:
             continue  # nested definitions are their own symbols
-        if child.type == "call":
+        # Python calls it `call`, JavaScript `call_expression`, and `new Foo()`
+        # is a construction that matters just as much for a call graph.
+        if child.type in ("call", "call_expression", "new_expression"):
             fn = child.child_by_field_name("function")
+            if fn is None:
+                fn = child.child_by_field_name("constructor")
             if fn is not None:
                 named = _call_name(fn)
                 if named is not None:
@@ -189,10 +208,11 @@ def _collect_calls(node: Node, acc: list[tuple[str, str]]) -> None:
 
 
 class _FileParser:
-    def __init__(self, path: Path, root: Path, parser: Parser):
+    def __init__(self, path: Path, root: Path, spec: LangSpec):
         self.path = path
         self.root = root
-        self.parser = parser
+        self.spec = spec
+        self.parser = Parser(spec.language)
         self.rel = path.relative_to(root).as_posix()
         self.symbols: dict[str, Symbol] = {}
         self.attrs: set[str] = set()
@@ -209,20 +229,43 @@ class _FileParser:
         else:
             err = None
         self.src = src_bytes.decode("utf8", "replace")
-        _collect_self_attrs(tree.root_node, self.attrs)
-        self._visit(tree.root_node, module_qualname(self.path, self.root), None)
+        _collect_self_attrs(tree.root_node, self.attrs, self.spec.attr_objects)
+        self._visit(tree.root_node,
+                    module_qualname(self.path, self.root, self.spec), None)
         return self.symbols, err
 
     def _visit(self, node: Node, prefix: str, owner_class: str | None) -> None:
+        spec = self.spec
         for child in node.named_children:
-            if child.type == "decorated_definition":
+            if child.type in spec.wrapper_nodes:
+                # A Python decorator or a JavaScript `export` wraps the real
+                # definition. Keep the wrapper as the span so the decorator or
+                # the `export` keyword shows up in the source we quote.
                 defn = child.child_by_field_name("definition")
+                if defn is None:
+                    defn = next((c for c in child.named_children
+                                 if c.type in spec.func_nodes + spec.class_nodes),
+                                None)
                 if defn is not None:
                     self._handle_def(defn, prefix, owner_class, outer=child)
-            elif child.type in ("function_definition", "class_definition"):
+                else:
+                    self._visit(child, prefix, owner_class)
+            elif child.type in spec.func_nodes + spec.class_nodes:
+                # `const x = 1` is also a variable_declarator. Only treat it as
+                # a function when a function is actually on the right.
+                if (child.type == "variable_declarator"
+                        and not self._declarator_is_function(child)):
+                    self._visit(child, prefix, owner_class)
+                    continue
                 self._handle_def(child, prefix, owner_class)
             else:
                 self._visit(child, prefix, owner_class)
+
+    @staticmethod
+    def _declarator_is_function(node: Node) -> bool:
+        value = node.child_by_field_name("value")
+        return value is not None and value.type in (
+            "arrow_function", "function_expression", "function")
 
     def _handle_def(
         self, node: Node, prefix: str, owner_class: str | None, outer: Node | None = None
@@ -230,11 +273,20 @@ class _FileParser:
         name_node = node.child_by_field_name("name")
         if name_node is None:
             return
+        spec = self.spec
         name = name_node.text.decode("utf8", "replace")
         qualname = f"{prefix}.{name}" if prefix else name
-        body = node.child_by_field_name("body")
-        span_node = outer or node  # decorators count as part of the definition
-        is_class = node.type == "class_definition"
+        span_node = outer or node  # decorators and `export` count as part of it
+        is_class = node.type in spec.class_nodes
+
+        # `const greet = () => ...` keeps its body and parameters on the arrow,
+        # not on the declarator that names it.
+        defn_node = node
+        if node.type == "variable_declarator":
+            value = node.child_by_field_name("value")
+            if value is not None:
+                defn_node = value
+        body = defn_node.child_by_field_name("body")
 
         sym = Symbol(
             qualname=qualname,
@@ -243,23 +295,29 @@ class _FileParser:
             file=self.rel,
             start_line=span_node.start_point[0] + 1,
             end_line=span_node.end_point[0] + 1,
-            docstring=_docstring(body),
+            docstring=docstring_of(spec, span_node, body),
             source=self.src[span_node.start_byte : span_node.end_byte],
             owner_class=owner_class,
+            # In JavaScript the public API is stated at the definition itself,
+            # not collected in a package file.
+            exported=bool(outer is not None
+                          and outer.type == "export_statement"),
         )
         if is_class:
-            supers = node.child_by_field_name("superclasses")
+            supers = node.child_by_field_name(spec.bases_field)
             if supers is not None:
                 for arg in supers.named_children:
                     if arg.type == "identifier":
                         sym.bases.append(arg.text.decode("utf8", "replace"))
-                    elif arg.type == "attribute":
-                        attr = arg.child_by_field_name("attribute")
+                    elif arg.type in ("attribute", "member_expression"):
+                        attr = (arg.child_by_field_name("attribute")
+                                or arg.child_by_field_name("property"))
                         if attr is not None:
                             sym.bases.append(attr.text.decode("utf8", "replace"))
         elif body is not None:
             _collect_calls(body, sym.calls)
-            sym.params = _param_names(node.child_by_field_name("parameters"))
+            sym.params = _param_names(
+                defn_node.child_by_field_name(spec.params_field))
 
         # Same name twice in a file (conditional defs, overloads) — keep the first.
         self.symbols.setdefault(qualname, sym)
@@ -271,13 +329,15 @@ class _FileParser:
 
 
 def analyze_files(root: Path, files: list[Path]) -> Analysis:
-    parser = Parser(PY_LANGUAGE)
     symbols: dict[str, Symbol] = {}
     errors: list[str] = []
     attributes: set[str] = set()
 
     for path in files:
-        fp = _FileParser(path, root, parser)
+        spec = spec_for(path)
+        if spec is None:
+            continue
+        fp = _FileParser(path, root, spec)
         found, err = fp.run()
         attributes |= fp.attrs
         symbols.update(found)

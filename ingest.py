@@ -9,11 +9,14 @@ REPOS_DIR = Path(__file__).parent / "repos"
 
 SKIP_DIRS = {
     ".git", ".github", ".venv", "venv", "env", "node_modules", "__pycache__",
+    "coverage", ".next", ".nuxt", "vendor", "third_party",
     ".pytest_cache", ".mypy_cache", ".tox", "build", "dist", "site-packages",
     ".idea", ".vscode", "docs", "examples",
 }
 
 SKIP_FILE_PREFIXES = ("test_", "conftest")
+# JavaScript keeps its tests beside the code far more often than Python does.
+SKIP_FILE_INFIXES = (".test.", ".spec.", ".min.", ".d.")
 SKIP_FILE_SUFFIXES = ("_test.py", "setup.py")
 
 
@@ -33,18 +36,33 @@ def is_test_path(path: Path, root: Path) -> bool:
     rel_parts = path.relative_to(root).parts
     if any(p in ("test", "tests") for p in rel_parts[:-1]):
         return True
+    if any(part in path.name for part in SKIP_FILE_INFIXES):
+        return True
     return path.name.startswith(SKIP_FILE_PREFIXES) or path.name.endswith(SKIP_FILE_SUFFIXES)
 
 
-def list_python_files(root: Path, include_tests: bool = False) -> list[Path]:
+def list_source_files(root: Path, include_tests: bool = False) -> list[Path]:
+    """Every file in a language we can parse, minus the junk.
+
+    Named for what it does now. `list_python_files` stays as an alias because
+    the name is used in a few places and the behaviour is unchanged for Python.
+    """
+    from languages import extensions
+
     found = []
-    for path in root.rglob("*.py"):
+    candidates: list[Path] = []
+    for ext in extensions():
+        candidates.extend(root.rglob(f"*{ext}"))
+    for path in candidates:
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         if not include_tests and is_test_path(path, root):
             continue
         found.append(path)
     return sorted(found)
+
+
+list_python_files = list_source_files
 
 
 def ingest(url: str, include_tests: bool = False) -> tuple[Path, list[Path]]:

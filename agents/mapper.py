@@ -117,7 +117,9 @@ def public_api_names(analysis: Analysis) -> set[str]:
     called by users, not by the repo itself — so it scores 0 on fan-in. The
     export list is the authors stating outright what newcomers are meant to use.
     """
-    names: set[str] = set()
+    # JavaScript and TypeScript mark exports at the definition, so the parser
+    # already knows. Python states them in __init__.py, read below.
+    names: set[str] = {s.name for s in analysis.symbols.values() if s.exported}
     init_files = {
         s.file for s in analysis.symbols.values() if s.file.endswith("__init__.py")
     }

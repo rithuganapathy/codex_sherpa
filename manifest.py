@@ -12,6 +12,7 @@ not paraphrased.
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -30,6 +31,8 @@ class Manifest:
     name: str = ""
     summary: str = ""
     python_requires: str = ""
+    runtime_requires: str = ""   # "Node >=18" for JavaScript
+    run_scripts: dict[str, str] = field(default_factory=dict)
     dependencies: list[str] = field(default_factory=list)
     dep_source: str = ""
     total_deps: int = 0
@@ -40,11 +43,14 @@ class Manifest:
     readme: str = ""
     runnable_modules: list[str] = field(default_factory=list)
     has_tests: bool = False
+    workspace_note: str = ""
+    is_node: bool = False
 
     @property
     def found_anything(self) -> bool:
         return bool(self.dependencies or self.install_cmds or self.usage_block
-                    or self.console_scripts or self.runnable_modules)
+                    or self.console_scripts or self.runnable_modules
+                    or self.run_scripts)
 
 
 def _read(path: Path) -> str:
@@ -77,6 +83,69 @@ def _from_pyproject(root: Path, m: Manifest) -> None:
     scripts = project.get("scripts", {})
     if isinstance(scripts, dict):
         m.console_scripts = {str(k): str(v) for k, v in scripts.items()}
+
+
+def _from_package_json(root: Path, m: Manifest) -> None:
+    """The JavaScript equivalent of pyproject.toml.
+
+    Checked before requirements.txt so a mixed repo prefers the manifest that
+    actually describes it.
+    """
+    path = root / "package.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(_read(path))
+    except json.JSONDecodeError:
+        return
+
+    m.is_node = True
+    m.name = m.name or str(data.get("name", ""))
+    m.summary = m.summary or str(data.get("description", ""))
+    engines = data.get("engines") or {}
+    if isinstance(engines, dict) and engines.get("node"):
+        m.runtime_requires = f"Node {engines['node']}"
+
+    deps = data.get("dependencies") or {}
+    source = "package.json"
+
+    # A workspace monorepo keeps nothing at the root but scripts. cordis is one:
+    # the dependencies that describe the project live in packages/core. Take the
+    # largest member rather than reporting a project with no dependencies.
+    if not deps and data.get("workspaces"):
+        best, best_path = {}, ""
+        for member in sorted(root.glob("packages/*/package.json")):
+            try:
+                sub = json.loads(_read(member))
+            except json.JSONDecodeError:
+                continue
+            sub_deps = sub.get("dependencies") or {}
+            if len(sub_deps) > len(best):
+                best = sub_deps
+                best_path = member.relative_to(root).as_posix()
+        if best:
+            deps, source = best, best_path
+            m.workspace_note = (f"A workspace monorepo. The dependencies below "
+                                f"are {best_path}, its largest package.")
+
+    if isinstance(deps, dict) and deps:
+        pairs = [f"{k}@{v}" for k, v in deps.items()]
+        m.total_deps = len(pairs)
+        m.dependencies = pairs[:MAX_DEPS]
+        m.dep_source = source
+
+    scripts = data.get("scripts") or {}
+    if isinstance(scripts, dict):
+        # Only the ones a newcomer would actually run first.
+        for key in ("start", "dev", "build", "test"):
+            if scripts.get(key):
+                m.run_scripts[key] = str(scripts[key])
+
+    bins = data.get("bin")
+    if isinstance(bins, str) and m.name:
+        m.console_scripts[m.name] = bins
+    elif isinstance(bins, dict):
+        m.console_scripts.update({str(k): str(v) for k, v in bins.items()})
 
 
 def _from_requirements(root: Path, m: Manifest) -> None:
@@ -157,6 +226,7 @@ def _entry_points(root: Path, m: Manifest, py_files: list[Path]) -> None:
 def read_manifest(root: Path, py_files: list[Path] | None = None) -> Manifest:
     m = Manifest()
     _from_pyproject(root, m)
+    _from_package_json(root, m)
     _from_requirements(root, m)
     _from_readme(root, m)
     _entry_points(root, m, py_files or [])
@@ -192,13 +262,21 @@ def render(m: Manifest) -> str:
         out += head("Check your Python version")
         out += [f"This project needs Python `{m.python_requires}`.", "",
                 "```bash", "python --version", "```"]
+    elif m.runtime_requires:
+        out += head("Check your runtime version")
+        out += [f"This project needs `{m.runtime_requires}`.", "",
+                "```bash", "node --version", "```"]
 
     # 2 — install
     if m.install_cmds:
         out += head("Install it", f"quoted from {m.readme}")
         out += ["```bash", *m.install_cmds, "```"]
     elif m.dependencies or m.name:
-        if m.dep_source == "requirements.txt":
+        if m.is_node:
+            cmd, note = ("npm install",
+                         "inferred from package.json, the README gives no "
+                         "install command")
+        elif m.dep_source == "requirements.txt":
             cmd, note = (f"pip install -r {m.dep_source}",
                          f"inferred from {m.dep_source}")
         elif m.name:
@@ -209,6 +287,9 @@ def render(m: Manifest) -> str:
             cmd, note = "pip install .", "inferred, for a local checkout"
         out += head("Install it", note)
         out += ["```bash", cmd, "```"]
+
+    if m.workspace_note:
+        out += ["", m.workspace_note]
 
     if m.dependencies:
         shown = ", ".join(f"`{d}`" for d in m.dependencies)
@@ -225,6 +306,12 @@ def render(m: Manifest) -> str:
         out += [f"```{m.usage_lang}", m.usage_block, "```"]
 
     # 4 — the ways in
+    if m.run_scripts:
+        out += head("Run it", "from the scripts block in package.json")
+        out += ["```bash"] + [f"npm run {k}" for k in m.run_scripts] + ["```"]
+        out += ["", "Those map to: " + ", ".join(
+            f"`{k}` = `{v[:60]}`" for k, v in m.run_scripts.items())]
+
     if m.console_scripts or m.runnable_modules:
         out += head("Know the ways in")
         if m.console_scripts:
