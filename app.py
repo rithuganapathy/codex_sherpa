@@ -467,9 +467,14 @@ def render_results(state: dict) -> None:
             st.info("The source is not available locally, so questions cannot "
                     "be answered.")
         else:
-            q = st.text_input("Your question", key="ask_q",
-                              placeholder="how are session cookies signed?")
-            if st.button("Ask", key="ask_btn") and q.strip():
+            # A form so the box empties itself once the question is asked, and
+            # so Enter submits. Left as a plain input it kept the previous
+            # question sitting there looking like it had been typed again.
+            with st.form("ask_form", clear_on_submit=True, border=False):
+                q = st.text_input("Your question", key="ask_q",
+                                  placeholder="how are session cookies signed?")
+                asked = st.form_submit_button("Ask")
+            if asked and q.strip():
                 with st.spinner("Searching the code, answering, then checking "
                                 "the answer…"):
                     try:
@@ -645,8 +650,9 @@ st.markdown(
 with st.sidebar:
     st.markdown(SIDEBAR_FLOWERS, unsafe_allow_html=True)
     st.header("let him cook")
-    url = st.text_input("repo", "https://github.com/pallets/flask",
-                        placeholder="paste a github repo…",
+    # Empty, not pre-filled. A default URL sitting in the box reads as though
+    # the choice has been made for you.
+    url = st.text_input("repo", "", placeholder="paste a github repo…",
                         label_visibility="collapsed")
     # Some repos hold more than one project. unslothai/unsloth carries a web app
     # in studio/ that is 13x the size of the library, and without this the
