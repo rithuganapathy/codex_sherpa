@@ -100,15 +100,35 @@ class Analysis:
     parse_errors: list[str]
     attributes: set[str] = field(default_factory=set)  # self.x names
 
+    # Built once, on first use. Scanning every edge per lookup is fine for a
+    # 200-edge repo and quadratic for a real one: ranking unsloth meant 24,929
+    # symbols each walking 35,039 edges twice, which took over ten minutes
+    # before a single model call had been made.
+    _out: dict[str, list[str]] | None = field(default=None, repr=False)
+    _in: dict[str, list[str]] | None = field(default=None, repr=False)
+
+    def _index(self) -> None:
+        out: dict[str, set[str]] = {}
+        inc: dict[str, set[str]] = {}
+        for caller, callee in self.edges:
+            out.setdefault(caller, set()).add(callee)
+            inc.setdefault(callee, set()).add(caller)
+        self._out = {k: sorted(v) for k, v in out.items()}
+        self._in = {k: sorted(v) for k, v in inc.items()}
+
     def fan(self, qualname: str) -> tuple[int, int]:
         """(callers, callees) — the two numbers every ranking decision uses."""
         return len(self.callers(qualname)), len(self.callees(qualname))
 
     def callees(self, qualname: str) -> list[str]:
-        return sorted({c for caller, c in self.edges if caller == qualname})
+        if self._out is None:
+            self._index()
+        return self._out.get(qualname, [])
 
     def callers(self, qualname: str) -> list[str]:
-        return sorted({caller for caller, c in self.edges if c == qualname})
+        if self._in is None:
+            self._index()
+        return self._in.get(qualname, [])
 
 
 def module_qualname(path: Path, root: Path, spec: LangSpec | None = None) -> str:

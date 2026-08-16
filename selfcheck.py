@@ -748,6 +748,34 @@ def check_alternatives(check) -> None:
             urllib.request.urlopen = old_open
 
 
+def check_graph_index(check) -> None:
+    """Adjacency is indexed once, not rescanned per lookup.
+
+    Ranking asks for callers and callees of every symbol. Scanning all edges
+    each time made unsloth take over ten minutes before a single model call.
+    """
+    import time
+
+    from analyze import Analysis
+
+    n = 400
+    edges = [(f"m.f{i}", f"m.f{(i + 1) % n}") for i in range(n)]
+    edges += [(f"m.f{i}", "m.hub") for i in range(n)]
+    a = Analysis(root=Path("."), symbols={}, edges=edges, unresolved=[],
+                 parse_errors=[])
+
+    check("callees are correct", a.callees("m.f0"), ["m.f1", "m.hub"])
+    check("callers are correct", len(a.callers("m.hub")), n)
+    check("a symbol with no edges returns empty", a.callees("m.nobody"), [])
+
+    started = time.monotonic()
+    for i in range(n):
+        a.fan(f"m.f{i}")
+    elapsed = time.monotonic() - started
+    # Indexed this is microseconds. Rescanning 800 edges 800 times is not.
+    check("fan-out over the whole graph stays fast", elapsed < 0.5, True)
+
+
 def check_scoping(check) -> None:
     """Reading one folder of a repo that holds several projects."""
     from ingest import list_source_files, suggest_subdirs
@@ -881,6 +909,7 @@ def main() -> int:
     check_aggregator(a, check)
     check_manifest(check)
     check_alternatives(check)
+    check_graph_index(check)
     check_scoping(check)
     check_insights(a, check)
     check_phase_flow(a, check)
