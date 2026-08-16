@@ -748,6 +748,32 @@ def check_alternatives(check) -> None:
             urllib.request.urlopen = old_open
 
 
+def check_scoping(check) -> None:
+    """Reading one folder of a repo that holds several projects."""
+    from ingest import list_source_files, suggest_subdirs
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "lib").mkdir()
+        (root / "webapp").mkdir()
+        (root / "lib" / "core.py").write_text("def a(): pass\n", encoding="utf8")
+        for i in range(4):
+            (root / "webapp" / f"page{i}.tsx").write_text(
+                "export const C = () => 1;\n", encoding="utf8")
+
+        check("unscoped reads everything", len(list_source_files(root)), 5)
+        check("scoped reads only that folder",
+              [p.name for p in list_source_files(root, subdir="lib")], ["core.py"])
+        # The suggestion exists so a reader can see which half is which.
+        check("areas are ranked by size", suggest_subdirs(root)[0], ("webapp", 4))
+
+        try:
+            list_source_files(root, subdir="nope")
+            check("a bad folder raises", "no error", "FileNotFoundError")
+        except FileNotFoundError as exc:
+            check("a bad folder names the real ones", "webapp" in str(exc), True)
+
+
 def check_insights(a, check) -> None:
     """The repo's own rough edges. Counted, never estimated."""
     from insights import repo_limits, unused
@@ -855,6 +881,7 @@ def main() -> int:
     check_aggregator(a, check)
     check_manifest(check)
     check_alternatives(check)
+    check_scoping(check)
     check_insights(a, check)
     check_phase_flow(a, check)
 

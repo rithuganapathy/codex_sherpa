@@ -40,6 +40,7 @@ class State(TypedDict, total=False):
     max_rounds: int
     round: int
     reuse: bool
+    subdir: str
 
     analysis: Analysis
     repo_map: RepoMap
@@ -58,7 +59,7 @@ class NoPythonError(RuntimeError):
 
 
 def node_analyze(state: State) -> dict[str, Any]:
-    a = analyze(state["url"])
+    a = analyze(state["url"], state.get("subdir", ""))
     if not a.symbols:
         # Fail here, in a sentence, rather than spending minutes producing an
         # empty map. Phase 1 only collects .py files, so a TypeScript or Go
@@ -71,7 +72,7 @@ def node_analyze(state: State) -> dict[str, Any]:
                         sorted(kinds.items(), key=lambda kv: -kv[1])[:3])
         raise NoPythonError(
             f"{a.root.name} has no Python files this tool can read. "
-            f"It is mostly {top}. Only Python is supported today.")
+            f"It is mostly {top}. Python, JavaScript and TypeScript are supported.")
     return {
         "analysis": a,
         "repo": a.root.name,
@@ -188,10 +189,12 @@ def save_outputs(state: State) -> Path:
     return OUT_DIR / f"{repo}.md"
 
 
-def run(url: str, top: int = 10, max_rounds: int = 2, reuse: bool = False) -> State:
+def run(url: str, top: int = 10, max_rounds: int = 2, reuse: bool = False,
+        subdir: str = "") -> State:
     started = time.monotonic()
     final: State = build_graph().invoke(
-        {"url": url, "top": top, "max_rounds": max_rounds, "reuse": reuse},
+        {"url": url, "top": top, "max_rounds": max_rounds, "reuse": reuse,
+         "subdir": subdir},
         {"recursion_limit": 50},
     )
 
@@ -223,10 +226,13 @@ def main() -> None:
     ap.add_argument("url")
     ap.add_argument("--top", type=int, default=10)
     ap.add_argument("--max-rounds", type=int, default=2)
+    ap.add_argument("--subdir", default="",
+                    help="only read this folder, for repos holding more than "
+                         "one project")
     ap.add_argument("--reuse", action="store_true",
                     help="reuse a saved map instead of re-running the Mapper")
     args = ap.parse_args()
-    run(args.url, args.top, args.max_rounds, args.reuse)
+    run(args.url, args.top, args.max_rounds, args.reuse, args.subdir)
 
 
 if __name__ == "__main__":

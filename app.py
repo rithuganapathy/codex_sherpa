@@ -344,7 +344,8 @@ def cached_repos() -> list[str]:
                   for p in OUT_DIR.glob("*.draft.json"))
 
 
-def run_pipeline(url: str, top: int, max_rounds: int, reuse: bool) -> dict:
+def run_pipeline(url: str, top: int, max_rounds: int, reuse: bool,
+                 subdir: str = "") -> dict:
     """Stream the graph so each node reports as it finishes."""
     started = time.monotonic()
     graph = build_graph()
@@ -352,7 +353,8 @@ def run_pipeline(url: str, top: int, max_rounds: int, reuse: bool) -> dict:
 
     with st.status("Starting…", expanded=True) as status:
         for chunk in graph.stream(
-            {"url": url, "top": top, "max_rounds": max_rounds, "reuse": reuse},
+            {"url": url, "top": top, "max_rounds": max_rounds,
+             "reuse": reuse, "subdir": subdir},
             {"recursion_limit": 50},
         ):
             for node, update in chunk.items():
@@ -362,6 +364,9 @@ def run_pipeline(url: str, top: int, max_rounds: int, reuse: bool) -> dict:
 
                 if node == "analyze":
                     a = update["analysis"]
+                    from ingest import suggest_subdirs
+
+                    st.session_state["areas"] = suggest_subdirs(a.root)
                     st.caption(f"{len(a.symbols)} symbols, {len(a.edges)} "
                                f"verified calls")
                 elif node == "map":
@@ -643,6 +648,18 @@ with st.sidebar:
     url = st.text_input("repo", "https://github.com/pallets/flask",
                         placeholder="paste a github repo…",
                         label_visibility="collapsed")
+    # Some repos hold more than one project. unslothai/unsloth carries a web app
+    # in studio/ that is 13x the size of the library, and without this the
+    # ranking documents the wrong half.
+    subdir = st.text_input("folder", "", placeholder="whole repo",
+                           label_visibility="collapsed",
+                           help="Leave empty to read everything. Set it when a "
+                                "repo holds several projects.")
+    _areas = st.session_state.get("areas") or []
+    if _areas:
+        st.caption("Biggest areas: "
+                   + ", ".join(f"`{d}` ({n})" for d, n in _areas[:4]))
+
     top = st.slider("How many functions to cover", 5, 30, 8,
                     help="More coverage, more waiting. Eight is a good first look.")
     max_rounds = st.slider("Rewrite attempts", 0, 3, 2,
@@ -688,9 +705,12 @@ if go:
         st.error("Enter a repository URL.")
     else:
         try:
-            result = run_pipeline(url.strip(), top, max_rounds, reuse)
+            result = run_pipeline(url.strip(), top, max_rounds, reuse,
+                                  subdir.strip())
             result["url"] = url.strip()
             st.session_state["result"] = result
+        except FileNotFoundError as exc:
+            st.error(str(exc))
         except NoPythonError as exc:
             st.error(str(exc))
             st.caption("Adding another language means a tree-sitter grammar "

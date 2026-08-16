@@ -404,8 +404,8 @@ def analyze_files(root: Path, files: list[Path]) -> Analysis:
     return Analysis(root, symbols, edges, unresolved, errors, attributes)
 
 
-def analyze(url: str) -> Analysis:
-    root, files = ingest(url)
+def analyze(url: str, subdir: str = "") -> Analysis:
+    root, files = ingest(url, subdir=subdir)
     return analyze_files(root, files)
 
 

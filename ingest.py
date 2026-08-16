@@ -41,7 +41,8 @@ def is_test_path(path: Path, root: Path) -> bool:
     return path.name.startswith(SKIP_FILE_PREFIXES) or path.name.endswith(SKIP_FILE_SUFFIXES)
 
 
-def list_source_files(root: Path, include_tests: bool = False) -> list[Path]:
+def list_source_files(root: Path, include_tests: bool = False,
+                      subdir: str = "") -> list[Path]:
     """Every file in a language we can parse, minus the junk.
 
     Named for what it does now. `list_python_files` stays as an alias because
@@ -49,10 +50,21 @@ def list_source_files(root: Path, include_tests: bool = False) -> list[Path]:
     """
     from languages import extensions
 
+    # A repo can hold more than one project. unslothai/unsloth carries a web
+    # app in studio/ that is 13x the size of the library, and it would win the
+    # ranking and take the documentation with it.
+    scope = root / subdir if subdir else root
+    if subdir and not scope.is_dir():
+        raise FileNotFoundError(
+            f"{subdir!r} is not a folder in this repository. "
+            f"Top level holds: "
+            + ", ".join(sorted(p.name for p in root.iterdir()
+                               if p.is_dir() and not p.name.startswith("."))[:8]))
+
     found = []
     candidates: list[Path] = []
     for ext in extensions():
-        candidates.extend(root.rglob(f"*{ext}"))
+        candidates.extend(scope.rglob(f"*{ext}"))
     for path in candidates:
         if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
             continue
@@ -65,9 +77,24 @@ def list_source_files(root: Path, include_tests: bool = False) -> list[Path]:
 list_python_files = list_source_files
 
 
-def ingest(url: str, include_tests: bool = False) -> tuple[Path, list[Path]]:
+def ingest(url: str, include_tests: bool = False,
+           subdir: str = "") -> tuple[Path, list[Path]]:
     root = clone_repo(url)
-    return root, list_python_files(root, include_tests)
+    return root, list_source_files(root, include_tests, subdir)
+
+
+def suggest_subdirs(root: Path, limit: int = 6) -> list[tuple[str, int]]:
+    """Top-level folders holding source, largest first.
+
+    Used to tell someone which parts of a repo they could scope to, with the
+    file counts that make the choice obvious.
+    """
+    counts: dict[str, int] = {}
+    for path in list_source_files(root):
+        parts = path.relative_to(root).parts
+        key = parts[0] if len(parts) > 1 else "(root)"
+        counts[key] = counts.get(key, 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])[:limit]
 
 
 if __name__ == "__main__":
