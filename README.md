@@ -7,7 +7,6 @@ Paste a GitHub URL, wait a few minutes, and get documentation for a repository
 you have never seen: what it does, how it is laid out, what happens in what
 order, and how to run it. Everything runs on your own machine.
 
-<!-- Drop a screenshot in as docs/screenshot.png and it will appear here. -->
 ![The app](docs/screenshot.png)
 
 ## What makes it different
