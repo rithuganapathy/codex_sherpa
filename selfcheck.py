@@ -876,6 +876,23 @@ def check_phase_flow(a, check) -> None:
     check("markdown flow is numbered", markdown_phase_flow(a, m).startswith("1. "),
           True)
 
+    # The flow was wired into the app but not into the document, so the
+    # downloaded file was missing the one view that explains the order.
+    from agents.critic import Review
+    from agents.writer import Draft, Section
+    from aggregator import build_document
+
+    doc = build_document(
+        a, m,
+        Draft(repo="sample", model="m",
+              sections=[Section("s", "Bit", "Body.", "component")]),
+        [Review("s", "Bit", True, 1, [])])
+    check("the document carries the flow too",
+          "What happens, in order" in doc, True)
+    check("the flow comes before the file graph",
+          doc.index("What happens, in order") < doc.index("## Symbol reference"),
+          True)
+
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:

@@ -118,6 +118,15 @@ Those map to: `build` = `yarn yakumo esbuild && yarn yakumo tsc`, `test` = `yarn
 
 ## Architecture
 
+**What happens, in order.** The main path through this project, starting from the way in. The order comes from the real call graph.
+
+1. **Notifies fibers about updates to specified names** — `notify`
+2. **Emit** — `emit`, `_checkImpl`, `_refresh`
+3. **Determines if a value is traceable** — `getTraceable`, `_setEpoch`
+4. **Determines if a value is an object** — `isObject`, `_reload`, `_unload`
+5. ** execute** — `_execute`, `_getState`, `dispose`
+6. **Safecollect** — `safeCollect`, `collect`
+
 **Which files depend on which.** 18 relationships, with the number on each arrow counting how many calls cross that boundary. Read the heaviest arrows first: they are where the work flows.
 
 ```mermaid

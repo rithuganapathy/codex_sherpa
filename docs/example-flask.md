@@ -128,6 +128,14 @@ pytest
 
 ## Architecture
 
+**What happens, in order.** The main path through this project, starting from the way in. The order comes from the real call graph.
+
+1. **Handles a WSGI request** — `wsgi_app`
+2. **Dispatches a request** — `full_dispatch_request`, `handle_exception`, `request_context`
+3. **Finalizes a request** — `finalize_request`, `dispatch_request`, `handle_user_exception`
+4. **Converts a view function's return value** — `make_response`, `handle_http_exception`, `make_default_options_response`
+5. **Is null session** — `is_null_session`
+
 **Which files depend on which.** 18 relationships, with the number on each arrow counting how many calls cross that boundary. Read the heaviest arrows first: they are where the work flows.
 
 ```mermaid

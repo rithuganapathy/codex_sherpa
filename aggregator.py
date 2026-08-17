@@ -517,6 +517,15 @@ def build_document(analysis: Analysis, repo_map: RepoMap, draft: Draft,
 
     parts += ["## Architecture", ""]
 
+    # Flow first, same as the app. A file graph says where code lives, which is
+    # no use to someone who has never heard of these files. This says what
+    # happens. It was in the app and missing from the document for a while.
+    flow = markdown_phase_flow(analysis, repo_map)
+    if flow:
+        parts += ["**What happens, in order.** The main path through this "
+                  "project, starting from the way in. The order comes from the "
+                  "real call graph.", "", flow, ""]
+
     modules = mermaid_module_graph(analysis)
     if modules:
         n_edges = len(module_edges(analysis))
