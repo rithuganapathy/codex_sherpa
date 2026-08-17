@@ -806,8 +806,16 @@ def check_insights(a, check) -> None:
     """The repo's own rough edges. Counted, never estimated."""
     from insights import repo_limits, unused
 
+    from insights import plural
+
+    check("one is singular", plural(1, "pair"), "1 pair")
+    check("two is plural", plural(2, "pair"), "2 pairs")
+    check("zero is plural", plural(0, "test file"), "0 test files")
+
     limits = repo_limits(a, set())
     labels = " | ".join(f.label for f in limits.findings)
+    check("no line reads '1 pairs' or '1 functions'",
+          any(f" 1 {w}s" in labels for w in ("pair", "function", "other")), False)
 
     check("undocumented functions are counted", "docstring" in labels, True)
     check("test suite is reported", "test suite" in labels.lower(), True)

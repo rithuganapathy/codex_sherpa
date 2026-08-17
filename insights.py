@@ -15,6 +15,11 @@ from pathlib import Path
 
 from analyze import Analysis
 
+
+def plural(n: int, one: str, many: str = "") -> str:
+    """`1 pair of files` rather than `1 pairs of files`."""
+    return f"{n} {one}" if n == 1 else f"{n} {many or one + 's'}"
+
 # Dunder methods and tiny helpers are not "undocumented code" in any useful
 # sense, and counting them makes every repo look bad.
 def _documentable(sym) -> bool:
@@ -76,7 +81,8 @@ def unused(analysis: Analysis, exports: set[str]) -> Finding | None:
         return Finding("No obviously unused functions", good=True)
     names = ", ".join(f"`{q.split('.')[-1]}`" for q in sorted(suspects)[:4])
     more = f" and {len(suspects) - 4} more" if len(suspects) > 4 else ""
-    return Finding(f"{len(suspects)} functions appear unused",
+    return Finding(f"{plural(len(suspects), 'function')} "
+                   f"appear{'s' if len(suspects) == 1 else ''} unused",
                    f"{names}{more}. Nothing in the repo calls them, though a "
                    f"caller outside it would not show here")
 
@@ -88,7 +94,8 @@ def oversized(analysis: Analysis, threshold: int = 80) -> Finding | None:
     if not big:
         return None
     top = big[0]
-    extra = f", and {len(big) - 1} others over {threshold} lines" if len(big) > 1 else ""
+    extra = (f", and {plural(len(big) - 1, 'other')} over {threshold} lines"
+             if len(big) > 1 else "")
     return Finding(f"Longest function is `{top.name}` at {top.line_count} lines",
                    f"{top.file}:{top.start_line}{extra}")
 
@@ -103,7 +110,7 @@ def tested(analysis: Analysis) -> Finding | None:
     if not test_files:
         return Finding("No test suite found",
                        "nothing here can confirm the code still behaves")
-    return Finding(f"Has a test suite, {len(test_files)} test files",
+    return Finding(f"Has a test suite, {plural(len(test_files), 'test file')}",
                    f"against {len(analysis.symbols)} functions and classes",
                    good=True)
 
@@ -121,7 +128,8 @@ def cycles(analysis: Analysis) -> Finding | None:
     shown = ", ".join(f"`{Path(a).name}` and `{Path(b).name}`"
                       for a, b in sorted(both)[:2])
     more = f", and {len(both) - 2} more" if len(both) > 2 else ""
-    return Finding(f"{len(both)} pairs of files import each other both ways",
+    return Finding(f"{plural(len(both), 'pair')} of files import each "
+                   f"other both ways",
                    f"{shown}{more}. Circular dependencies make files hard to "
                    f"read on their own")
 
