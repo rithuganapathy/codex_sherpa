@@ -159,7 +159,8 @@ STYLE = f"""
 }}
 
 /* ---- buttons ---- */
-.stButton > button, .stDownloadButton > button {{
+.stButton > button, .stDownloadButton > button,
+.stFormSubmitButton > button {{
     border-radius: 999px;
     border: none;
     font-weight: 650;
@@ -169,7 +170,8 @@ STYLE = f"""
     box-shadow: 0 4px 14px rgba(231, 80, 143, 0.30);
     transition: transform .15s ease, box-shadow .15s ease;
 }}
-.stButton > button:hover, .stDownloadButton > button:hover {{
+.stButton > button:hover, .stDownloadButton > button:hover,
+.stFormSubmitButton > button:hover {{
     transform: translateY(-1px);
     box-shadow: 0 7px 20px rgba(231, 80, 143, 0.42);
     color: #fff;
@@ -471,8 +473,7 @@ def render_results(state: dict) -> None:
             # so Enter submits. Left as a plain input it kept the previous
             # question sitting there looking like it had been typed again.
             with st.form("ask_form", clear_on_submit=True, border=False):
-                q = st.text_input("Your question", key="ask_q",
-                                  placeholder="how are session cookies signed?")
+                q = st.text_input("Your question", key="ask_q")
                 asked = st.form_submit_button("Ask")
             if asked and q.strip():
                 with st.spinner("Searching the code, answering, then checking "
