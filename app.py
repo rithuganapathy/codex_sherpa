@@ -517,20 +517,20 @@ def render_results(state: dict) -> None:
 
                     st.markdown(render_examples(ans.examples))
 
-                # Sources are only meaningful when the answer came from them.
-                if ans.from_source and ans.sources:
-                    with st.expander("What the answer was allowed to read"):
-                        st.caption("If these look unrelated to your question, "
-                                   "distrust the answer no matter what the "
-                                   "badge says.")
-                        for s in ans.sources:
-                            st.markdown(f"`{s['score']:.3f}`  `{s['qualname']}` "
-                                        f"— {s['file']}:{s['start_line']}")
-                if ans.review and ans.review.warnings:
-                    with st.expander(f"{len(ans.review.warnings)} thing(s) that "
-                                     f"could not be checked"):
-                        for i in ans.review.warnings:
-                            st.caption(i.detail)
+                # The list of retrieved symbols and the unverifiable-claim list
+                # are both machinery. A reader wants the answer, not a table of
+                # similarity scores.
+                #
+                # One thing survives, because it protects them: when nothing
+                # relevant was found, the model still answers from whatever came
+                # back, and the answer reads as confidently as any other. That
+                # is the failure the scores used to reveal, so it is said in a
+                # sentence instead.
+                if ans.from_source and ans.sources and ans.best_score < 0.25:
+                    st.caption("Nothing in this repository looked closely "
+                               "related to that question, so read this answer "
+                               "with more suspicion than usual. Rephrasing with "
+                               "words the code itself would use often helps.")
 
     with tabs[1]:
         _ask_panel(analysis)
