@@ -30,7 +30,7 @@ from llm import CODE_MODEL, PROSE_MODEL, LLMError, available_models
 
 st.set_page_config(
     page_title="Codex Sherpa",
-    page_icon="🧭",
+    page_icon="🦄",
     layout="wide",
     # The sidebar holds every control this app has. Streamlit's "auto" default
     # can start it collapsed, which leaves a first-time visitor on a page with
@@ -48,11 +48,11 @@ PALETTE = {
     "ink": "#4A2C40",
     # Forget-me-not: sky-blue petals, gold eye, and pink buds — the buds are
     # genuinely pink before they open, which is what ties them to the palette.
-    "petal": "#8FC1EA",
-    "petal_pale": "#BCDCF6",
-    "eye": "#FFD873",
-    "bud": "#F0A6C8",
-    "leaf": "#9CCBA6",
+    "petal": "#5E9FD4",
+    "petal_pale": "#8FC1EA",
+    "eye": "#F5C33B",
+    "bud": "#E080AE",
+    "leaf": "#6FAE7C",
 }
 
 # Petal centres: five circles at 72° steps starting at 12 o'clock, radius 7.
@@ -71,7 +71,7 @@ def flower_cluster(uid: str, size: int = 150) -> str:
     blooms = "".join(
         f'<g transform="translate({x},{y}) scale({s}) rotate({r})">'
         f'<use href="#p{uid}" fill="{PALETTE[fill]}" '
-        f'stroke="#6FA8DC" stroke-width="0.7"/>'
+        f'stroke="#3F7FB8" stroke-width="0.7"/>'
         f'<circle r="2.5" fill="{PALETTE["eye"]}"/>'
         f'<circle r="1" fill="#FFF6DA"/></g>'
         for x, y, s, r, fill in (
@@ -270,7 +270,7 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
     position: fixed;
     z-index: 0;
     pointer-events: none;
-    opacity: 0.55;
+    opacity: 0.8;
     filter: drop-shadow(0 3px 8px rgba(168, 123, 212, 0.18));
 }}
 /* Only the right-hand pair are fixed to the viewport. The left corners sit
@@ -285,7 +285,7 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 .sherpa-sb-flower {{
     position: absolute;
     pointer-events: none;
-    opacity: 0.45;
+    opacity: 0.7;
     z-index: 0;
 }}
 .sherpa-sb-flower--top {{ top: -14px; left: -8px; }}
