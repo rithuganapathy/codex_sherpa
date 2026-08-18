@@ -59,21 +59,32 @@ PALETTE = {
 _PETALS = [(0, -7), (6.66, -2.16), (4.11, 5.66), (-4.11, 5.66), (-6.66, -2.16)]
 
 
-def flower_cluster(uid: str, size: int = 150) -> str:
+# The banner is pink and blue already, so its sprigs are gold instead: same
+# flower, different colours.
+SCHEMES = {
+    "blue": {"petal": "#5E9FD4", "petal_pale": "#8FC1EA", "eye": "#F5C33B",
+             "edge": "#3F7FB8", "core": "#FFF6DA"},
+    "gold": {"petal": "#F0BE2E", "petal_pale": "#F8DA7B", "eye": "#E7508F",
+             "edge": "#C9971A", "core": "#FFF3CF"},
+}
+
+
+def flower_cluster(uid: str, size: int = 150, scheme: str = "blue") -> str:
     """A sprig of forget-me-nots as inline SVG.
 
     `uid` keeps the <defs> ids unique — the same cluster is drawn six times on
     the page, and duplicate ids are invalid HTML.
     """
+    c = SCHEMES.get(scheme, SCHEMES["blue"])
     petals = "".join(
         f'<circle cx="{x}" cy="{y}" r="5.4"/>' for x, y in _PETALS
     )
     blooms = "".join(
         f'<g transform="translate({x},{y}) scale({s}) rotate({r})">'
-        f'<use href="#p{uid}" fill="{PALETTE[fill]}" '
-        f'stroke="#3F7FB8" stroke-width="0.7"/>'
-        f'<circle r="2.5" fill="{PALETTE["eye"]}"/>'
-        f'<circle r="1" fill="#FFF6DA"/></g>'
+        f'<use href="#p{uid}" fill="{c[fill]}" '
+        f'stroke="{c["edge"]}" stroke-width="0.7"/>'
+        f'<circle r="2.5" fill="{c["eye"]}"/>'
+        f'<circle r="1" fill="{c["core"]}"/></g>'
         for x, y, s, r, fill in (
             (40, 44, 1.15, 0, "petal"),
             (72, 30, 0.85, 25, "petal_pale"),
@@ -276,6 +287,8 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 /* Only the right-hand pair are fixed to the viewport. The left corners sit
    underneath the sidebar, which is opaque — so those two are rendered inside
    the sidebar instead (see .sherpa-sb-flower). */
+.sherpa-corner--tl {{ top: -14px;    left: -16px; }}
+.sherpa-corner--bl {{ bottom: -16px; left: -16px;  transform: scaleY(-1); }}
 .sherpa-corner--tr {{ top: -14px;    right: -16px;  transform: scaleX(-1); }}
 .sherpa-corner--br {{ bottom: -16px; right: -16px;  transform: scale(-1, -1); }}
 
@@ -335,7 +348,7 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 CORNERS = "".join(
     f"<div class='sherpa-corner sherpa-corner--{pos}'>"
     f"{flower_cluster(pos, 165)}</div>"
-    for pos in ("tr", "br")
+    for pos in ("tl", "tr", "bl", "br")
 )
 
 SIDEBAR_FLOWERS = "".join(
@@ -656,8 +669,8 @@ st.markdown(STYLE, unsafe_allow_html=True)
 st.markdown(CORNERS, unsafe_allow_html=True)
 st.markdown(
     "<div class='sherpa-hero'>"
-    f"<div class='sherpa-sprig sherpa-sprig--l'>{flower_cluster('hl', 92)}</div>"
-    f"<div class='sherpa-sprig sherpa-sprig--r'>{flower_cluster('hr', 78)}</div>"
+    f"<div class='sherpa-sprig sherpa-sprig--l'>{flower_cluster('hl', 92, 'gold')}</div>"
+    f"<div class='sherpa-sprig sherpa-sprig--r'>{flower_cluster('hr', 78, 'gold')}</div>"
     "<h1>Codex Sherpa</h1>"
     "<p>Point it at a codebase nobody has time to explain to you. "
     "It reads the whole thing, writes it up, then marks its own homework "
