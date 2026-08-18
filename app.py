@@ -281,19 +281,37 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 
 /* overflow-x matters: the sprigs are inset with negative offsets, and without
    this they widen the sidebar's scroll box and shove its controls off-screen. */
-[data-testid="stSidebar"] {{ position: relative; overflow-x: hidden; }}
+[data-testid="stSidebar"] {{
+    position: relative;
+    overflow-x: hidden;
+    min-height: 100vh;
+}}
+/* Streamlit wraps each element in a positioned, zero-height container, so an
+   absolute sprig anchored to it resolves against a box with no height: both
+   ended up in the same corner and `bottom: 0` drew at the top. Take that
+   wrapper out of the positioning chain so the sidebar itself is the anchor. */
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sherpa-sb-flower) {{
+    position: static;
+}}
 .sherpa-sb-flower {{
     position: absolute;
     pointer-events: none;
     opacity: 0.7;
     z-index: 0;
 }}
-.sherpa-sb-flower--top {{ top: -14px; left: -8px; }}
-.sherpa-sb-flower--bottom {{ bottom: -10px; left: -6px; transform: scaleY(-1); }}
+.sherpa-sb-flower--top {{ top: -18px; right: -28px; }}
+.sherpa-sb-flower--bottom {{ bottom: 0; left: -30px; transform: scaleY(-1); }}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
     z-index: 1;
+    padding-top: 1rem;
 }}
+/* Streamlit spaces sidebar blocks generously. Tighten it so the
+   controls stay together and the gap at the bottom shrinks. */
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{
+    gap: 0.6rem;
+}}
+[data-testid="stSidebar"] hr {{ margin: 0.7rem 0; }}
 
 @media (max-width: 900px) {{
     /* On a narrow screen the corners crowd the controls. */
@@ -322,7 +340,7 @@ CORNERS = "".join(
 
 SIDEBAR_FLOWERS = "".join(
     f"<div class='sherpa-sb-flower sherpa-sb-flower--{pos}'>"
-    f"{flower_cluster('sb' + pos, 140)}</div>"
+    f"{flower_cluster('sb' + pos, 118)}</div>"
     for pos in ("top", "bottom")
 )
 
