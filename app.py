@@ -127,11 +127,13 @@ STYLE = f"""
 #MainMenu, footer {{
     display: none !important;
 }}
-/* Keep the way back to the sidebar, and keep it clickable above the flowers. */
+/* Keep the way back to the sidebar, and keep it clickable above the flowers.
+   The corners now sit at 999992, so this has to clear that or the top-left
+   sprig would be drawn over the only control that reopens the sidebar. */
 [data-testid="stExpandSidebarButton"] {{
     display: flex !important;
     visibility: visible !important;
-    z-index: 100;
+    z-index: 999999;
 }}
 
 /* Streamlit reserves a large top margin for that toolbar. With its contents
@@ -279,14 +281,16 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
    without it they would swallow clicks on anything beneath them. */
 .sherpa-corner {{
     position: fixed;
-    z-index: 0;
+    /* Above the sidebar, which Streamlit puts at 999991. At any lower value the
+       two left corners are painted but invisible: the sidebar covers that whole
+       column, so tl and bl lost every hit test while tr and br passed. Drawing
+       over the sidebar is safe because pointer-events is none, so the controls
+       underneath stay clickable. */
+    z-index: 999992;
     pointer-events: none;
     opacity: 0.8;
     filter: drop-shadow(0 3px 8px rgba(168, 123, 212, 0.18));
 }}
-/* Only the right-hand pair are fixed to the viewport. The left corners sit
-   underneath the sidebar, which is opaque — so those two are rendered inside
-   the sidebar instead (see .sherpa-sb-flower). */
 .sherpa-corner--tl {{ top: -14px;    left: -16px; }}
 .sherpa-corner--bl {{ bottom: -16px; left: -16px;  transform: scaleY(-1); }}
 .sherpa-corner--tr {{ top: -14px;    right: -16px;  transform: scaleX(-1); }}
@@ -299,21 +303,9 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
     overflow-x: hidden;
     min-height: 100vh;
 }}
-/* Streamlit wraps each element in a positioned, zero-height container, so an
-   absolute sprig anchored to it resolves against a box with no height: both
-   ended up in the same corner and `bottom: 0` drew at the top. Take that
-   wrapper out of the positioning chain so the sidebar itself is the anchor. */
-[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sherpa-sb-flower) {{
-    position: static;
-}}
-.sherpa-sb-flower {{
-    position: absolute;
-    pointer-events: none;
-    opacity: 0.7;
-    z-index: 0;
-}}
-.sherpa-sb-flower--top {{ top: -18px; right: -28px; }}
-.sherpa-sb-flower--bottom {{ bottom: 0; left: -30px; transform: scaleY(-1); }}
+/* The sidebar used to carry its own two sprigs, because the page corners could
+   not be seen through it. Now that the corners sit above the sidebar those are
+   gone: keeping both drew two flowers in the same spot. */
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
     z-index: 1;
@@ -351,12 +343,6 @@ CORNERS = "".join(
     f"<div class='sherpa-corner sherpa-corner--{pos}'>"
     f"{flower_cluster(pos, 165)}</div>"
     for pos in ("tl", "tr", "bl", "br")
-)
-
-SIDEBAR_FLOWERS = "".join(
-    f"<div class='sherpa-sb-flower sherpa-sb-flower--{pos}'>"
-    f"{flower_cluster('sb' + pos, 118)}</div>"
-    for pos in ("top", "bottom")
 )
 
 NODE_LABELS = {
@@ -682,7 +668,6 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.markdown(SIDEBAR_FLOWERS, unsafe_allow_html=True)
     st.header("let him cook")
     # Empty, not pre-filled. A default URL sitting in the box reads as though
     # the choice has been made for you.
