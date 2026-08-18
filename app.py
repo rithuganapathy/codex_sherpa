@@ -327,8 +327,10 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 [data-testid="stSidebar"] hr {{ margin: 0.7rem 0; }}
 
 @media (max-width: 900px) {{
-    /* On a narrow screen the corners crowd the controls. */
-    .sherpa-corner {{ display: none; }}
+    /* Shrink rather than hide. Hiding them meant a narrow window lost every
+       corner flower at once, which reads as a bug rather than a choice. */
+    .sherpa-corner {{ transform-origin: center; opacity: 0.6; }}
+    .sherpa-corner svg {{ width: 95px; height: 95px; }}
 }}
 
 .sherpa-hero {{ position: relative; overflow: hidden; }}
