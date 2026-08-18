@@ -321,8 +321,8 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 @media (max-width: 900px) {{
     /* Shrink rather than hide. Hiding them meant a narrow window lost every
        corner flower at once, which reads as a bug rather than a choice. */
-    .sherpa-corner {{ transform-origin: center; opacity: 0.6; }}
-    .sherpa-corner svg {{ width: 95px; height: 95px; }}
+    .sherpa-corner {{ transform-origin: center; opacity: 0.75; }}
+    .sherpa-corner svg {{ width: 112px; height: 112px; }}
 }}
 
 .sherpa-hero {{ position: relative; overflow: hidden; }}
