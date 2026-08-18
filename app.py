@@ -281,12 +281,12 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
    without it they would swallow clicks on anything beneath them. */
 .sherpa-corner {{
     position: fixed;
-    /* Above the sidebar, which Streamlit puts at 999991. At any lower value the
-       two left corners are painted but invisible: the sidebar covers that whole
-       column, so tl and bl lost every hit test while tr and br passed. Drawing
-       over the sidebar is safe because pointer-events is none, so the controls
-       underneath stay clickable. */
-    z-index: 999992;
+    /* Below the sidebar on purpose. Lifting these above it did make the left
+       pair appear, but they then painted over "let him cook" and the caption:
+       the sidebar is a stacking context, so there is no value that clears its
+       background without also clearing its text. The sidebar draws its own
+       sprigs instead (.sherpa-sb-flower), behind its content. */
+    z-index: 0;
     pointer-events: none;
     opacity: 0.8;
     filter: drop-shadow(0 3px 8px rgba(168, 123, 212, 0.18));
@@ -303,9 +303,29 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
     overflow-x: hidden;
     min-height: 100vh;
 }}
-/* The sidebar used to carry its own two sprigs, because the page corners could
-   not be seen through it. Now that the corners sit above the sidebar those are
-   gone: keeping both drew two flowers in the same spot. */
+/* A collapsed sidebar keeps left:0, width:300 and visibility:visible — only
+   aria-expanded changes. So it goes on covering the two left page corners even
+   when it looks shut, which is why they never once appeared there. Drop it out
+   of the stack when it is closed and those corners come through. */
+[data-testid="stSidebar"][aria-expanded="false"] {{ z-index: 0 !important; }}
+
+/* Streamlit wraps each element in a positioned, zero-height container, so an
+   absolute sprig anchored to it resolves against a box with no height: both
+   ended up in the same corner and `bottom: 0` drew at the top. Take that
+   wrapper out of the positioning chain so the sidebar itself is the anchor. */
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sherpa-sb-flower) {{
+    position: static;
+}}
+/* z-index 0 keeps these under stSidebarUserContent, which sits at 1. That is
+   what stops a sprig ever landing on top of a word, whatever its size. */
+.sherpa-sb-flower {{
+    position: absolute;
+    pointer-events: none;
+    opacity: 0.75;
+    z-index: 0;
+}}
+.sherpa-sb-flower--top {{ top: -24px; left: -26px; }}
+.sherpa-sb-flower--bottom {{ bottom: -12px; left: -30px; transform: scaleY(-1); }}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
     z-index: 1;
@@ -343,6 +363,12 @@ CORNERS = "".join(
     f"<div class='sherpa-corner sherpa-corner--{pos}'>"
     f"{flower_cluster(pos, 165)}</div>"
     for pos in ("tl", "tr", "bl", "br")
+)
+
+SIDEBAR_FLOWERS = "".join(
+    f"<div class='sherpa-sb-flower sherpa-sb-flower--{pos}'>"
+    f"{flower_cluster('sb' + pos, 118)}</div>"
+    for pos in ("top", "bottom")
 )
 
 NODE_LABELS = {
@@ -668,6 +694,7 @@ st.markdown(
 )
 
 with st.sidebar:
+    st.markdown(SIDEBAR_FLOWERS, unsafe_allow_html=True)
     st.header("let him cook")
     # Empty, not pre-filled. A default URL sitting in the box reads as though
     # the choice has been made for you.
