@@ -324,11 +324,14 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
     opacity: 0.75;
     z-index: 0;
 }}
-/* Anchored right, not left. The header is left-aligned, and a left-hand sprig
-   ran straight through "let him cook" — legible, since the text sits above it,
-   but crowded. There is nothing on the right of that row to collide with. */
-.legible-sb-flower--top {{ top: -20px; right: -30px; }}
-.legible-sb-flower--bottom {{ bottom: -12px; left: -30px; transform: scaleY(-1); }}
+/* Top-left and bottom-right, mirroring the page corners. The offsets are large
+   because these anchor to stSidebarUserContent, which starts ~76px down, not to
+   the sidebar edge. Pulling the top one up that far also lifts it clear of
+   "let him cook", which is what had pushed it to the right before. */
+.legible-sb-flower--top {{ top: -84px; left: -26px; }}
+.legible-sb-flower--bottom {{
+    bottom: -12px; right: -30px; transform: scale(-1, -1);
+}}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
     z-index: 1;
