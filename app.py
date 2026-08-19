@@ -38,9 +38,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Stamped from this file's own mtime, so it changes whenever the source does.
-BUILD = time.strftime("%H:%M:%S", time.localtime(Path(__file__).stat().st_mtime))
-
 PALETTE = {
     "pink": "#E7508F",
     "pink_soft": "#FBD5E7",
@@ -754,10 +751,6 @@ with st.sidebar:
     st.caption("Give it a few minutes. Both models run on your own machine, so "
                "nothing leaves it, and nothing arrives faster than your GPU can "
                "think.")
-    # Temporary. A stale browser tab and a fixed bug look identical from the
-    # outside, and that cost several rounds of guessing. This says which one
-    # you are looking at. Remove once the layout is settled.
-    st.caption(f"build {BUILD}")
 
 if go:
     if not url.strip():
