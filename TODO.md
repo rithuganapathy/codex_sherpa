@@ -125,7 +125,7 @@ Nothing has been pushed. All 28 commits are local.
 
 ### 1. Create an empty repository on GitHub
 
-Go to <https://github.com/new>. Give it a name, for example `codex-sherpa`.
+Go to <https://github.com/new>. Give it a name, for example `legible`.
 
 **Do not** tick "Add a README", "Add .gitignore" or "Choose a licence". The repo
 must be empty, or the first push will be rejected for having unrelated history.
@@ -134,7 +134,7 @@ must be empty, or the first push will be rejected for having unrelated history.
 
 ```bash
 cd D:\project\codex_sherpa
-git remote add origin https://github.com/<your-username>/codex-sherpa.git
+git remote add origin https://github.com/<your-username>/legible.git
 ```
 
 Check it took:

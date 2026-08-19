@@ -29,7 +29,7 @@ from ingest import list_python_files
 from llm import CODE_MODEL, PROSE_MODEL, LLMError, available_models
 
 st.set_page_config(
-    page_title="Codex Sherpa",
+    page_title="Legible",
     page_icon="🦄",
     layout="wide",
     # The sidebar holds every control this app has. Streamlit's "auto" default
@@ -150,7 +150,7 @@ STYLE = f"""
 [data-testid="InputInstructions"] {{ display: none !important; }}
 
 /* ---- headline ---- */
-.sherpa-hero {{
+.legible-hero {{
     background: linear-gradient(120deg, #FFE3F1 0%, #F3E3FB 50%, #FFE8DC 100%);
     border-radius: 22px;
     padding: 1.6rem 2rem;
@@ -158,7 +158,7 @@ STYLE = f"""
     border: 1px solid {PALETTE['pink_soft']};
     box-shadow: 0 8px 22px rgba(231, 80, 143, 0.12);
 }}
-.sherpa-hero h1 {{
+.legible-hero h1 {{
     margin: 0;
     font-size: 2.5rem;
     font-weight: 800;
@@ -168,7 +168,7 @@ STYLE = f"""
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }}
-.sherpa-hero p {{
+.legible-hero p {{
     margin: 0.4rem 0 0;
     color: #8A5C77;
     font-size: 1.02rem;
@@ -282,22 +282,22 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 /* ---- forget-me-nots ----
    pointer-events:none is essential: these sit over the page corners, and
    without it they would swallow clicks on anything beneath them. */
-.sherpa-corner {{
+.legible-corner {{
     position: fixed;
     /* Below the sidebar on purpose. Lifting these above it did make the left
        pair appear, but they then painted over "let him cook" and the caption:
        the sidebar is a stacking context, so there is no value that clears its
        background without also clearing its text. The sidebar draws its own
-       sprigs instead (.sherpa-sb-flower), behind its content. */
+       sprigs instead (.legible-sb-flower), behind its content. */
     z-index: 0;
     pointer-events: none;
     opacity: 0.8;
     filter: drop-shadow(0 3px 8px rgba(168, 123, 212, 0.18));
 }}
-.sherpa-corner--tl {{ top: -14px;    left: -16px; }}
-.sherpa-corner--bl {{ bottom: -16px; left: -16px;  transform: scaleY(-1); }}
-.sherpa-corner--tr {{ top: -14px;    right: -16px;  transform: scaleX(-1); }}
-.sherpa-corner--br {{ bottom: -16px; right: -16px;  transform: scale(-1, -1); }}
+.legible-corner--tl {{ top: -14px;    left: -16px; }}
+.legible-corner--bl {{ bottom: -16px; left: -16px;  transform: scaleY(-1); }}
+.legible-corner--tr {{ top: -14px;    right: -16px;  transform: scaleX(-1); }}
+.legible-corner--br {{ bottom: -16px; right: -16px;  transform: scale(-1, -1); }}
 
 /* overflow-x matters: the sprigs are inset with negative offsets, and without
    this they widen the sidebar's scroll box and shove its controls off-screen. */
@@ -316,19 +316,19 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
    absolute sprig anchored to it resolves against a box with no height: both
    ended up in the same corner and `bottom: 0` drew at the top. Take that
    wrapper out of the positioning chain so the sidebar itself is the anchor. */
-[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.sherpa-sb-flower) {{
+[data-testid="stSidebar"] [data-testid="stElementContainer"]:has(.legible-sb-flower) {{
     position: static;
 }}
 /* z-index 0 keeps these under stSidebarUserContent, which sits at 1. That is
    what stops a sprig ever landing on top of a word, whatever its size. */
-.sherpa-sb-flower {{
+.legible-sb-flower {{
     position: absolute;
     pointer-events: none;
     opacity: 0.75;
     z-index: 0;
 }}
-.sherpa-sb-flower--top {{ top: -24px; left: -26px; }}
-.sherpa-sb-flower--bottom {{ bottom: -12px; left: -30px; transform: scaleY(-1); }}
+.legible-sb-flower--top {{ top: -24px; left: -26px; }}
+.legible-sb-flower--bottom {{ bottom: -12px; left: -30px; transform: scaleY(-1); }}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
     z-index: 1;
@@ -344,32 +344,32 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
 @media (max-width: 900px) {{
     /* Shrink rather than hide. Hiding them meant a narrow window lost every
        corner flower at once, which reads as a bug rather than a choice. */
-    .sherpa-corner {{ transform-origin: center; opacity: 0.75; }}
-    .sherpa-corner svg {{ width: 112px; height: 112px; }}
+    .legible-corner {{ transform-origin: center; opacity: 0.75; }}
+    .legible-corner svg {{ width: 112px; height: 112px; }}
 }}
 
-.sherpa-hero {{ position: relative; overflow: hidden; }}
-.sherpa-hero .sherpa-sprig {{
+.legible-hero {{ position: relative; overflow: hidden; }}
+.legible-hero .legible-sprig {{
     position: absolute;
     pointer-events: none;
     opacity: 0.7;
 }}
-.sherpa-hero .sherpa-sprig--l {{ top: -10px; left: -8px; }}
-.sherpa-hero .sherpa-sprig--r {{
+.legible-hero .legible-sprig--l {{ top: -10px; left: -8px; }}
+.legible-hero .legible-sprig--r {{
     bottom: -12px; right: -6px; transform: scale(-1, -1);
 }}
-.sherpa-hero > * {{ position: relative; z-index: 1; }}
+.legible-hero > * {{ position: relative; z-index: 1; }}
 </style>
 """
 
 CORNERS = "".join(
-    f"<div class='sherpa-corner sherpa-corner--{pos}'>"
+    f"<div class='legible-corner legible-corner--{pos}'>"
     f"{flower_cluster(pos, 165)}</div>"
     for pos in ("tl", "tr", "bl", "br")
 )
 
 SIDEBAR_FLOWERS = "".join(
-    f"<div class='sherpa-sb-flower sherpa-sb-flower--{pos}'>"
+    f"<div class='legible-sb-flower legible-sb-flower--{pos}'>"
     f"{flower_cluster('sb' + pos, 118)}</div>"
     for pos in ("top", "bottom")
 )
@@ -685,10 +685,10 @@ def render_results(state: dict) -> None:
 st.markdown(STYLE, unsafe_allow_html=True)
 st.markdown(CORNERS, unsafe_allow_html=True)
 st.markdown(
-    "<div class='sherpa-hero'>"
-    f"<div class='sherpa-sprig sherpa-sprig--l'>{flower_cluster('hl', 92, 'gold')}</div>"
-    f"<div class='sherpa-sprig sherpa-sprig--r'>{flower_cluster('hr', 78, 'gold')}</div>"
-    "<h1>Codex Sherpa</h1>"
+    "<div class='legible-hero'>"
+    f"<div class='legible-sprig legible-sprig--l'>{flower_cluster('hl', 92, 'gold')}</div>"
+    f"<div class='legible-sprig legible-sprig--r'>{flower_cluster('hr', 78, 'gold')}</div>"
+    "<h1>Legible</h1>"
     "<p>Point it at a codebase nobody has time to explain to you. "
     "It reads the whole thing, writes it up, then marks its own homework "
     "in red pen.</p>"

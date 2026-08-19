@@ -13,7 +13,7 @@ so every switch between them evicts the other and reloads from disk:
 Phase 8 must therefore **batch by model** — run every Mapper call, then every
 Writer call, then every Critic call — instead of cycling per symbol. Cycling
 three models per symbol costs ~42s of pure loading each, which is minutes of
-dead time on any real repo. Set SHERPA_SINGLE_MODEL=1 to route prose through the
+dead time on any real repo. Set LEGIBLE_SINGLE_MODEL=1 to route prose through the
 code model too and avoid swaps entirely.
 
 Run `python llm.py` for a health check + smoke test.
@@ -29,23 +29,23 @@ from typing import Any
 
 import ollama
 
-CODE_MODEL = os.getenv("SHERPA_CODE_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
-PROSE_MODEL = os.getenv("SHERPA_PROSE_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+CODE_MODEL = os.getenv("LEGIBLE_CODE_MODEL", "qwen2.5-coder:7b-instruct-q4_K_M")
+PROSE_MODEL = os.getenv("LEGIBLE_PROSE_MODEL", "qwen2.5:7b-instruct-q4_K_M")
 
 # One model for everything — trades some prose quality for zero swap overhead.
-if os.getenv("SHERPA_SINGLE_MODEL") == "1":
+if os.getenv("LEGIBLE_SINGLE_MODEL") == "1":
     PROSE_MODEL = CODE_MODEL
 
 # Ollama unloads after 5 minutes by default. A pipeline that pauses to parse or
 # embed between calls would come back to a cold model and eat the reload.
-KEEP_ALIVE = os.getenv("SHERPA_KEEP_ALIVE", "30m")
+KEEP_ALIVE = os.getenv("LEGIBLE_KEEP_ALIVE", "30m")
 
 # Ollama defaults to a 4096-token context. Code prompts blow past that and the
 # overflow is dropped *silently* from the front — which would quietly delete the
 # instructions. Raise it; qwen2.5 handles 32k, but bigger costs CPU RAM.
-NUM_CTX = int(os.getenv("SHERPA_NUM_CTX", "8192"))
+NUM_CTX = int(os.getenv("LEGIBLE_NUM_CTX", "8192"))
 
-DEFAULT_TIMEOUT = float(os.getenv("SHERPA_TIMEOUT", "300"))  # 7B on CPU is slow
+DEFAULT_TIMEOUT = float(os.getenv("LEGIBLE_TIMEOUT", "300"))  # 7B on CPU is slow
 MAX_RETRIES = 2
 
 
@@ -145,7 +145,7 @@ def ensure_ready(model: str = CODE_MODEL) -> None:
         near = [m for m in models if m.split(":")[0] == model.split(":")[0]]
         raise LLMError(
             f"Model {model!r} not found, but these look related: {near}\n"
-            f"Set SHERPA_CODE_MODEL to one of them, or run: ollama pull {model}"
+            f"Set LEGIBLE_CODE_MODEL to one of them, or run: ollama pull {model}"
         )
     raise LLMError(
         f"Model {model!r} not installed. Available: {models or '(none)'}\n"

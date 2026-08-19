@@ -100,10 +100,10 @@ Writer call, then every Critic call.
 
 `llm.STATS.summary()` counts swaps and warns when it detects thrashing. Escape hatches:
 
-- `SHERPA_SINGLE_MODEL=1` — route prose through the code model, zero swaps
-- `SHERPA_KEEP_ALIVE` — default `30m`, up from Ollama's 5m (a pipeline that pauses to
+- `LEGIBLE_SINGLE_MODEL=1` — route prose through the code model, zero swaps
+- `LEGIBLE_KEEP_ALIVE` — default `30m`, up from Ollama's 5m (a pipeline that pauses to
   parse or embed between calls would otherwise return to a cold model)
-- `SHERPA_NUM_CTX` — default 8192, up from Ollama's 4096. Code prompts exceed 4096 and
+- `LEGIBLE_NUM_CTX` — default 8192, up from Ollama's 4096. Code prompts exceed 4096 and
   the overflow is dropped **silently from the front**, which would delete your
   instructions rather than the code.
 

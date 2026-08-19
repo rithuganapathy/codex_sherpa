@@ -1,4 +1,4 @@
-# Codex Sherpa
+# Legible
 
 Point it at a codebase nobody has time to explain to you. It reads the whole
 thing, writes it up, then marks its own homework in red pen.
