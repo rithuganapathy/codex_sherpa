@@ -12,32 +12,14 @@ a handful of things that were considered and deliberately not built.
 | The 12-phase build plan | 100% — every phase done |
 | Works on real repositories | 100% — 8 repos, 3 languages, most recent run 8/8 |
 | Tests | ~182 offline checks, all passing |
-| Documentation for a stranger | 90% — README rewritten, screenshot missing |
-| Published | 0% — never pushed anywhere |
-
-The 10% gap is almost entirely "nobody else can see it".
+| Documentation for a stranger | 100% — README rewritten, screenshot in place |
+| Published | 100% — live at github.com/rithuganapathy/Legible |
 
 ---
 
 ## Must do to call it finished
 
-### 1. Screenshot (5 minutes)
-
-The README references `docs/screenshot.png`, which does not exist yet, so the
-image is currently broken on GitHub.
-
-```bash
-streamlit run app.py
-```
-
-Load a repo, take a screenshot of the browser, save it as `docs/screenshot.png`.
-Nothing else needs changing: the README already points at it.
-
-### 2. Push to GitHub (5 minutes)
-
-Steps are at the bottom of this file.
-
-### 3. Decide about a licence (2 minutes)
+### 1. Decide about a licence (2 minutes)
 
 There is none, which means the code is **all rights reserved** by default:
 people may read it on GitHub but may not legally copy, run or build on it. That

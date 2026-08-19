@@ -324,7 +324,10 @@ hr {{ border-color: {PALETTE['pink_soft']}; }}
     opacity: 0.75;
     z-index: 0;
 }}
-.legible-sb-flower--top {{ top: -24px; left: -26px; }}
+/* Anchored right, not left. The header is left-aligned, and a left-hand sprig
+   ran straight through "let him cook" — legible, since the text sits above it,
+   but crowded. There is nothing on the right of that row to collide with. */
+.legible-sb-flower--top {{ top: -20px; right: -30px; }}
 .legible-sb-flower--bottom {{ bottom: -12px; left: -30px; transform: scaleY(-1); }}
 [data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {{
     position: relative;
