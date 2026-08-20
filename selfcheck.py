@@ -311,12 +311,77 @@ def check_example_placeholders(a, check) -> None:
           name_severity("totally_made_up_api"), "error")
 
 
+PARAM_SAMPLE = '''
+class Agent:
+    """Does work."""
+
+    def __init__(self, settings=None, resolver=None):
+        self.settings = settings
+
+    def run(self, methodology=None, *, use_docker=True):
+        return methodology
+
+
+def build(*, checkpointer=None, interrupt_before=None):
+    return checkpointer
+'''
+
+
+def check_parameter_claims(check) -> None:
+    """Parameters claimed for the wrong function.
+
+    ARPA's documentation said DatasetAgent "is initialized with the methodology
+    ... whether to use Docker". Both are real names, so the unknown-name check
+    stayed quiet; both belong to run(), not __init__. The docs described the
+    wrong method's signature and the section still passed.
+    """
+    import tempfile
+    from pathlib import Path as _P
+
+    from agents.critic import verify_claims
+    from analyze import analyze_files
+
+    d = _P(tempfile.mkdtemp())
+    (d / "m.py").write_text(PARAM_SAMPLE, encoding="utf8")
+    a = analyze_files(d, [d / "m.py"])
+
+    def issues(subject, obj, quote):
+        return verify_claims(
+            [{"type": "parameter", "subject": subject, "object": obj,
+              "quote": quote}], a)
+
+    # A class claim is really a claim about __init__.
+    bad = issues("Agent", "use_docker", "Agent is initialized with use_docker")
+    check("a run() parameter claimed for the constructor is an error",
+          [i.kind for i in bad], ["wrong-parameter"])
+    check("the error says where the parameter really lives",
+          "run" in bad[0].detail, True)
+    check("the error names the class, not __init__",
+          "Agent constructor" in bad[0].detail, True)
+
+    check("a real constructor parameter passes",
+          issues("Agent", "resolver", "Agent takes a resolver"), [])
+    check("a real function parameter passes",
+          issues("build", "checkpointer", "build takes a checkpointer"), [])
+    check("an invented parameter is an error",
+          [i.kind for i in issues("build", "nope", "build takes a nope")],
+          ["wrong-parameter"])
+    # Same guard the call branch uses: a sentence naming neither side means
+    # extraction built the pair rather than reading it.
+    check("a claim from a sentence naming neither side is dropped",
+          issues("build", "nope", "the module does several things"), [])
+    check("prose objects are not treated as parameters",
+          issues("build", "an optional checkpointer", "build takes one"), [])
+
+
 def check_critic(a, check) -> None:
     """Phase 7 verification — the deterministic half. No LLM.
 
     Every false-positive case here was a real one produced on Flask's own docs.
     """
     from agents.critic import Review, verify_claims
+
+    check_parameter_claims(check)
 
     def one(claim):
         out = verify_claims([claim], a)

@@ -46,7 +46,9 @@ CLAIM_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": ["calls", "location", "behaviour"]},
+                    "type": {"type": "string",
+                             "enum": ["calls", "location", "parameter",
+                                      "behaviour"]},
                     "subject": {"type": "string"},
                     "object": {"type": "string"},
                     "quote": {"type": "string"},
@@ -135,6 +137,11 @@ def extract_claims(section: Section, model: str = CODE_MODEL) -> list[dict]:
         "another. subject = caller, object = callee.\n"
         "- type 'location': the text says something is defined in a file or at a "
         "line. subject = the symbol, object = the file or file:line.\n"
+        "- type 'parameter': the text says a function or class takes, accepts or "
+        "is initialised/constructed with a named argument. subject = the "
+        "function or class, object = ONE parameter name. Emit one claim per "
+        "parameter. Only use this when the text names the parameter; skip it if "
+        "the text merely describes an argument in prose.\n"
         "- type 'behaviour': any other assertion about what code does. "
         "subject = the symbol, object = the asserted behaviour.\n"
         "Use the exact identifier names as written. quote = the sentence it came from."
@@ -142,6 +149,23 @@ def extract_claims(section: Section, model: str = CODE_MODEL) -> list[dict]:
     data, _ = chat_json(prompt, system=SYSTEM, model=model, schema=CLAIM_SCHEMA)
     claims = data.get("claims", [])
     return [c for c in claims if isinstance(c, dict) and c.get("subject")]
+
+
+def _params_of(qual: str, analysis: Analysis) -> tuple[set[str], str]:
+    """Parameter names for a symbol, following a class to its __init__.
+
+    "The DatasetAgent class is initialized with a dataset description" is a
+    statement about __init__, which is where the parameters actually live.
+    Returns the names and the qualname they were read from.
+    """
+    sym = analysis.symbols.get(qual)
+    if sym is None:
+        return set(), qual
+    if sym.kind == "class":
+        init = analysis.symbols.get(qual + ".__init__")
+        if init is not None:
+            return {p for p in init.params if p != "self"}, qual + ".__init__"
+    return {p for p in sym.params if p != "self"}, qual
 
 
 def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
@@ -240,6 +264,55 @@ def verify_claims(claims: list[dict], analysis: Analysis) -> list[Issue]:
                 "false-call", "error", subject,
                 f"{subject!r} does not call {obj!r}. Verified calls from "
                 f"{subject!r}: {real or 'none'}", quote))
+
+        elif ctype == "parameter":
+            # ARPA's documentation said DatasetAgent "is initialized with the
+            # methodology, the paper context, the dataset description, whether
+            # to use Docker and whether to verify loading". Every one of those
+            # is real — they are the parameters of run(), not of __init__. The
+            # unknown-name check cannot see it, because the names do exist.
+            name = obj.strip().lstrip("*")
+            if not name or " " in name or "." in name:
+                continue  # prose, not an identifier
+
+            # Same guard the call branch uses: if the sentence names neither
+            # side, extraction assembled the pair rather than reading it.
+            if (subject.split(".")[-1].lower() not in quote.lower()
+                    and name.lower() not in quote.lower()):
+                continue
+
+            accepted: set[str] = set()
+            where = ""
+            for q in subj_quals:
+                params, src = _params_of(q, analysis)
+                if name in params:
+                    accepted, where = params, src
+                    break
+                if not accepted and params:
+                    accepted, where = params, src
+            if name in accepted:
+                continue
+            if not accepted:
+                continue  # no signature recorded, so nothing to check against
+
+            # The useful half of the message: where the parameter really lives.
+            # Naming the sibling turns "that is wrong" into "you meant run()".
+            owner = where.rsplit(".", 1)[0]
+            siblings = sorted(
+                q.split(".")[-1] for q, s in analysis.symbols.items()
+                if q.startswith(owner + ".") and name in s.params
+            )
+            hint = (f" {name!r} is a parameter of {', '.join(siblings)}."
+                    if siblings else "")
+            # Name it the way the documentation did. Reporting "__init__ has no
+            # parameter" makes the reader hunt for what that refers to.
+            what = (f"the {owner.split('.')[-1]} constructor"
+                    if where.endswith(".__init__")
+                    else f"{where.split('.')[-1]}()")
+            issues.append(Issue(
+                "wrong-parameter", "error", subject,
+                f"{what} has no parameter {name!r}. Real parameters: "
+                f"{', '.join(sorted(accepted))}.{hint}", quote))
 
         elif ctype == "location":
             # An English phrase is not a place. "url_for is at 'technical
