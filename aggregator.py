@@ -154,6 +154,27 @@ def _short_purpose(text: str, words: int = 7) -> str:
     return out[0].upper() + out[1:] if out else ""
 
 
+def _title_from_name(qual: str) -> str:
+    """A label built from an identifier, for when there is no usable purpose.
+
+    This used to be `.replace("_", " ").capitalize()`, which was wrong twice.
+    `capitalize()` lowercases everything after the first character, so the class
+    PaperBlock came out as "Paperblock"; and it uppercases only position zero,
+    which on `_select_central` is the space left by the leading underscore, so
+    that came out as " select central", indented and lowercase.
+    """
+    name = qual.split(".")[-1]
+    stripped = name.strip("_")
+    if not stripped:
+        return name
+    # A class keeps its own casing: "PaperBlock" is how the code spells it, and
+    # breaking it up reads worse than leaving it.
+    if "_" not in stripped and any(c.isupper() for c in stripped[1:]):
+        return stripped
+    words = stripped.replace("_", " ").strip()
+    return words[0].upper() + words[1:]
+
+
 def phase_flow(analysis: Analysis, repo_map: RepoMap,
                max_phases: int = MAX_PHASES) -> list[Phase]:
     """The order things happen in, starting from the way in.
@@ -200,14 +221,26 @@ def phase_flow(analysis: Analysis, repo_map: RepoMap,
 
     while layer and len(phases) < max_phases:
         lead = by_qual.get(layer[0])
+        doc = ""
+        sym = analysis.symbols.get(layer[0])
+        if sym and sym.docstring:
+            doc = sym.docstring.strip().splitlines()[0].strip()
+
+        # Three tiers, best first. Only the top few symbols get a Mapper note,
+        # so a step deeper in the chain usually has none, and the diagram then
+        # mixed one plain-English label with bare identifiers. A docstring is
+        # better than an identifier and, unlike the note, it is written in the
+        # source rather than by a model.
         title = _short_purpose(lead.purpose) if lead and lead.purpose else ""
+        if not title and doc:
+            title = _short_purpose(doc)
         if not title:
-            title = layer[0].split(".")[-1].replace("_", " ").capitalize()
+            title = _title_from_name(layer[0])
         phases.append(Phase(
             number=len(phases) + 1,
             title=title,
             symbols=list(layer),
-            detail=lead.purpose if lead else "",
+            detail=(lead.purpose if lead and lead.purpose else doc),
         ))
 
         nxt: list[str] = []

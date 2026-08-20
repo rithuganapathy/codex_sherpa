@@ -836,7 +836,21 @@ def check_insights(a, check) -> None:
 def check_phase_flow(a, check) -> None:
     """The ordered view: steps follow real calls, labels are plain English."""
     from agents.mapper import RepoMap, rank_symbols
-    from aggregator import _short_purpose, markdown_phase_flow, phase_flow
+    from aggregator import (_short_purpose, _title_from_name,
+                            markdown_phase_flow, phase_flow)
+
+    # Fallback labels, for steps whose symbol has no usable purpose. Both of
+    # these shipped wrong: capitalize() lowercases the tail, so the class
+    # PaperBlock read "Paperblock", and it only uppercases position zero, which
+    # on a private name is the space the underscore left behind.
+    check("a private helper loses its underscore, not its capital",
+          _title_from_name("pkg.mod._select_central"), "Select central")
+    check("a class keeps its own casing",
+          _title_from_name("pkg.mod.PaperBlock"), "PaperBlock")
+    check("a fallback label never starts with a space",
+          _title_from_name("pkg.mod._clean_text").startswith(" "), False)
+    check("dunders do not come out empty",
+          _title_from_name("pkg.mod.__init__"), "Init")
 
     # What matters is not ending ON a preposition. Cutting at every preposition
     # would wreck "Inserts multiple records into a SQLite table", which is a
@@ -875,6 +889,23 @@ def check_phase_flow(a, check) -> None:
           sum(len(p.symbols) for p in phases))
     check("markdown flow is numbered", markdown_phase_flow(a, m).startswith("1. "),
           True)
+
+    # Only the top few symbols get a Mapper note, so deeper steps had no purpose
+    # and fell straight to the identifier: one diagram read "Reduces a paper text
+    # to candidate blocks", then " select central", then "Paperblock". A
+    # docstring sits between the two, and comes from the source, not the model.
+    bare = rank_symbols(a, 6)
+    for n in bare:
+        n.purpose = ""
+    m_bare = RepoMap(repo="sample", root=str(a.root), model="m",
+                     total_symbols=len(a.symbols), total_edges=len(a.edges),
+                     entry_points=[], components=[], notes=bare)
+    bare_phases = phase_flow(a, m_bare)
+    titles = {p.symbols[0]: p.title for p in bare_phases}
+    check("a step with no purpose takes its label from the docstring",
+          titles.get("sample.documented_caller"), "Delegates the work")
+    check("a step with neither still gets a clean label",
+          titles.get("sample.outer"), "Outer")
 
     # The flow was wired into the app but not into the document, so the
     # downloaded file was missing the one view that explains the order.
