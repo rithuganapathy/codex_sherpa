@@ -542,10 +542,24 @@ def render_results(state: dict) -> None:
 
             ans = st.session_state.get("answer")
             if ans:
-                # Three outcomes, not two. A background answer has no review at
-                # all, because nothing in a call graph can confirm what SQLite
-                # is. Assuming a review always existed crashed this tab.
-                if not ans.from_source:
+                # Four outcomes now, not two. A background answer has no review
+                # at all, because nothing in a call graph can confirm what
+                # SQLite is. Assuming a review always existed crashed this tab.
+                #
+                # 'insufficient' used to fall under the same banner as
+                # 'background', so an answer that plainly said "the code
+                # provided does not contain any information about X" was shown
+                # to the reader as "Answered from general knowledge" — which it
+                # was not; the model looked at real source and correctly said
+                # it did not cover the question. Those are different things to
+                # tell someone, so now they get different banners.
+                if ans.coverage == "insufficient":
+                    st.warning("The code this tool looked at did not cover "
+                              "that question. Try rephrasing with words the "
+                              "code itself would use, or this may need more "
+                              "of the repository than a handful of snippets "
+                              "can cover.")
+                elif ans.coverage == "background":
                     st.info("Answered from general knowledge. There is nothing "
                             "in this repository to check it against, so it "
                             "carries no verification.")

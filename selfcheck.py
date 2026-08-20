@@ -898,6 +898,39 @@ def check_insights(a, check) -> None:
     check("nothing is flagged unused in this sample", u.good if u else True, True)
 
 
+def check_answer_coverage(check) -> None:
+    """The Ask tab's provenance banner, for all three coverage states.
+
+    Asking this tool's own repo 'how many agents do they use' retrieved five
+    real dataclasses, none of which answered the question. The model correctly
+    said so, but the schema only had a used_repo_code bool, so that answer and
+    a real general-knowledge answer both collapsed to the same "Answered from
+    general knowledge" banner — which was false for the first case. coverage
+    is now three-way and each state must read as a different thing.
+    """
+    from agents.answerer import Answer
+
+    grounded = Answer("q", "a", [], None, [], "grounded")
+    background = Answer("q", "a", [], None, [], "background")
+    insufficient = Answer("q", "a", [], None, [], "insufficient")
+
+    check("grounded is the only state that counts as from_source",
+          [grounded.from_source, background.from_source,
+           insufficient.from_source],
+          [True, False, False])
+    check("background and insufficient read as different things",
+          background.provenance == insufficient.provenance, False)
+    check("insufficient does not claim to be general knowledge",
+          "general knowledge" in insufficient.provenance, False)
+    check("background is still named as general knowledge",
+          "general knowledge" in background.provenance, True)
+
+    # A missing or malformed coverage value must not silently become
+    # "grounded" — that was the shape of the original bug, just one level up.
+    check("verified is vacuously true with no review, regardless of coverage",
+          insufficient.verified, True)
+
+
 def check_phase_flow(a, check) -> None:
     """The ordered view: steps follow real calls, labels are plain English."""
     from agents.mapper import RepoMap, rank_symbols
@@ -1034,6 +1067,7 @@ def main() -> int:
     check_scoping(check)
     check_insights(a, check)
     check_phase_flow(a, check)
+    check_answer_coverage(check)
 
     if failures:
         print(f"FAIL ({len(failures)})")

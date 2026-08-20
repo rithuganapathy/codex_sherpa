@@ -48,19 +48,27 @@ SYSTEM = (
     "project works, or they may ask about a technology it uses. Answer both "
     "kinds, and be clear about which one you are doing.\n"
     "\n"
-    "TWO KINDS OF QUESTION:\n"
-    "1. About THIS project: how something works here, what a function does, "
-    "where something happens. Answer from the source code shown, and set "
-    "used_repo_code to true. Name real functions in backticks. Only say A "
-    "calls B if you can see that call. If the code shown does not cover it, "
-    "say so and name what to look at instead.\n"
-    "2. Background: what a technology is, what a term means, why something is "
-    "used. Answer from your general knowledge and set used_repo_code to false. "
-    "Do NOT refuse just because it is not in the code. A reader asking 'what "
-    "is SQLite' wants a real answer.\n"
+    "THREE OUTCOMES. Pick one and set coverage to it:\n"
+    "1. 'grounded': the code shown answers the question. Answer from it. Name "
+    "real functions in backticks. Only say A calls B if you can see that "
+    "call.\n"
+    "2. 'background': a genuine question about a technology or term, not about "
+    "this specific project, e.g. 'what is SQLite'. Answer from your general "
+    "knowledge. Do NOT refuse just because it is not in the code shown; a "
+    "reader asking this wants a real answer.\n"
+    "3. 'insufficient': the question IS about this project, but the code shown "
+    "does not cover it. Say plainly that the five snippets you were given do "
+    "not answer it, and name what to look at instead if you can guess from the "
+    "file layout. Do not guess at an answer, and do not pad this out to sound "
+    "like you knew.\n"
     "\n"
-    "Where both apply, answer the background first in a sentence or two, then "
-    "connect it to this project, and set used_repo_code to true.\n"
+    "Where a question has both a background part and a project part, answer "
+    "the background first in a sentence or two, then connect it to this "
+    "project, and set coverage to 'grounded'.\n"
+    "\n"
+    "Never write 'insufficient' as if it were background knowledge, and never "
+    "write 'background' as if it came from the code shown. A reader is told "
+    "which one this is, and the two must not be confusable.\n"
     "\n"
     "STYLE: plain words, short sentences, under 150 words, no em dashes. "
     "Never invent a function, file or class name."
@@ -70,9 +78,10 @@ ANSWER_SCHEMA = {
     "type": "object",
     "properties": {
         "answer": {"type": "string"},
-        "used_repo_code": {"type": "boolean"},
+        "coverage": {"type": "string",
+                    "enum": ["grounded", "background", "insufficient"]},
     },
-    "required": ["answer", "used_repo_code"],
+    "required": ["answer", "coverage"],
 }
 
 
@@ -83,13 +92,26 @@ class Answer:
     sources: list[dict] = field(default_factory=list)
     review: Review | None = None
     examples: list[Example] = field(default_factory=list)
-    from_source: bool = True  # False when answered from general knowledge
+    # 'grounded' | 'background' | 'insufficient'. Three outcomes, not two: a
+    # question the retrieved code does not cover is a retrieval miss, not
+    # general knowledge, and telling them apart is the point of this field.
+    # It used to be a bool, and both non-grounded cases collapsed into one
+    # "general knowledge" banner — including answers that plainly said "the
+    # code provided does not contain any information about X".
+    coverage: str = "grounded"
+
+    @property
+    def from_source(self) -> bool:
+        return self.coverage == "grounded"
 
     @property
     def provenance(self) -> str:
         """Where this answer came from. Shown to the reader, never guessed at."""
-        if not self.from_source:
+        if self.coverage == "background":
             return "general knowledge, not checked against this repository"
+        if self.coverage == "insufficient":
+            return ("the retrieved code did not cover this question, so "
+                    "nothing here was checked or grounded in the source")
         if self.review is None:
             return "read from the source, unverified"
         return ("read from the source and checked against the call graph"
@@ -143,8 +165,13 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
     hits = search(analysis.root.name, question, k)
 
     if not hits:
+        # Same bug class as the coverage field below fixes: this used to fall
+        # through to the default coverage="grounded", so "nothing matched at
+        # all" and "the code shown fully answers this" looked the same to the
+        # reader.
         return Answer(question, "Nothing in this repository looks related to "
-                                "that question.", [], None)
+                                "that question.", [], None,
+                      coverage="insufficient")
 
     # The project's own one-line description, from pyproject.toml. It is what
     # lets a background question still be answered in context: "SQLite is an
@@ -169,7 +196,10 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
     data, _ = chat_json(prompt, system=SYSTEM, model=model,
                         schema=ANSWER_SCHEMA, temperature=0.1)
     text = str(data.get("answer", "")).strip()
-    from_source = bool(data.get("used_repo_code", True))
+    coverage = str(data.get("coverage", "grounded"))
+    if coverage not in ("grounded", "background", "insufficient"):
+        coverage = "grounded"
+    from_source = coverage == "grounded"
 
     # An explanation says what something is for. An example shows what calling
     # it looks like, which is usually the thing that makes it click. Prefer a
@@ -197,16 +227,17 @@ def ask(question: str, analysis: Analysis, k: int = DEFAULT_K,
     if verify and from_source:
         # Same verification path the documentation goes through: claims are
         # extracted, then checked against the call graph rather than judged.
-        # Skipped for background answers: there is nothing in the call graph
-        # that could confirm or deny what SQLite is, and running the check
-        # anyway would dress general knowledge up as verified.
+        # Skipped for anything not grounded: a background answer has nothing
+        # in the call graph to check it against, and an insufficient one
+        # already says it does not know, so there is nothing to verify either
+        # way.
         review = review_section(
             Section(key="answer", heading=question[:60], body=text,
                     kind="component",
                     allowed=[h["qualname"] for h in hits]),
             analysis, model)
 
-    return Answer(question, text, hits, review, found, from_source)
+    return Answer(question, text, hits, review, found, coverage)
 
 
 def _print(a: Answer) -> None:
